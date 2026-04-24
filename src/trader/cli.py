@@ -10,12 +10,12 @@ from typing import Any
 
 import pandas as pd
 
-from trader.backtest import BacktestConfig, run_backtest
-from trader.config import DEFAULT_FOREX_SYMBOLS, SUPPORTED_TIMEFRAMES
-from trader.mt5 import MetaTrader5Client, Mt5Error
-from trader.pipeline import build_forex_dataset, save_frame, save_latest_snapshot
-from trader.risk import PositionSizingInput, position_size_from_stop
-from trader.strategies import SUPPORTED_STRATEGIES, StrategyConfig, build_signal_frame, latest_signals
+from trader.broker.mt5 import MetaTrader5Client, Mt5Error
+from trader.broker.risk import PositionSizingInput, position_size_from_stop
+from trader.research.backtest import BacktestConfig, run_backtest
+from trader.research.config import DEFAULT_FOREX_SYMBOLS, SUPPORTED_TIMEFRAMES
+from trader.research.pipeline import build_forex_dataset, save_frame, save_latest_snapshot
+from trader.research.strategies import SUPPORTED_STRATEGIES, StrategyConfig, build_signal_frame, latest_signals
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "trader"
-version = "0.2.0"
+version = "0.3.0"
 description = "Trading workbench for Forex research, signals, backtests, and MetaTrader 5 operations."
 authors = ["Fabian"]
 readme = "README.md"
@@ -13,6 +13,7 @@ pandas = "^2.2.3"
 pyarrow = "^19.0.1"
 ta = "^0.11.0"
 yfinance = "^0.2.66"
+rich = "^13.9.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
@@ -22,6 +23,15 @@ MetaTrader5 = { version = "^5.0.5735", markers = "sys_platform == 'win32'" }
 
 [tool.poetry.scripts]
 trader = "trader.cli:main"
+trader-demo-pipeline = "trader.apps.demo_account_pipeline:main"
+trader-demo-observability = "trader.apps.demo_observability:main"
+trader-demo-dashboard = "trader.apps.demo_dashboard:main"
+trader-example-train = "trader.apps.simple_train_predict_demo:main"
+trader-example-monitor = "trader.apps.simple_live_monitor_demo:main"
+trader-example-review = "trader.apps.simple_trade_review_demo:main"
+trader-eval-train-test = "trader.apps.simple_train_test_evaluation:main"
+trader-eval-cv = "trader.apps.simple_cross_validation_evaluation:main"
+trader-eval-report = "trader.apps.simple_full_evaluation_report:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
