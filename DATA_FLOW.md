@@ -284,7 +284,7 @@ flowchart TD
     T -- yes --> A1{trend_adx ≥ adx_threshold?}
     T -- no --> S{ema_20 < ema_50?}
     A1 -- no --> Flat([signal = 0])
-    A1 -- yes --> P1{|close/ema_20 - 1| ≤ pullback_tolerance?}
+    A1 -- yes --> P1{"|close/ema_20 - 1| ≤ pullback_tolerance?"}
     P1 -- no --> Flat
     P1 -- yes --> R1{long_rsi_floor ≤ rsi ≤ 70?}
     R1 -- no --> Flat
@@ -292,7 +292,7 @@ flowchart TD
     S -- yes --> A2{trend_adx ≥ adx_threshold?}
     S -- no --> Flat
     A2 -- no --> Flat
-    A2 -- yes --> P2{|close/ema_20 - 1| ≤ pullback_tolerance?}
+    A2 -- yes --> P2{"|close/ema_20 - 1| ≤ pullback_tolerance?"}
     P2 -- no --> Flat
     P2 -- yes --> R2{30 ≤ rsi ≤ short_rsi_ceiling?}
     R2 -- no --> Flat
