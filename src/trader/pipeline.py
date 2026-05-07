@@ -1,4 +1,4 @@
-"""High-level workflow for fetching, enriching, and exporting Forex datasets."""
+"""High-level workflow for fetching, enriching, and exporting market datasets."""
 
 from __future__ import annotations
 
@@ -7,18 +7,18 @@ from typing import Iterable
 
 import pandas as pd
 
-from trader.config import DEFAULT_FOREX_SYMBOLS
+from trader.config import DEFAULT_ALPACA_SYMBOLS
 from trader.data_sources import FetchRequest, fetch_ohlcv
 from trader.indicators import build_indicator_frame, build_latest_snapshot
 
 
-def build_forex_dataset(
+def build_dataset(
     symbols: Iterable[str] | None = None,
     timeframe: str = "1h",
     bars: int = 1500,
-    source: str = "auto",
+    source: str = "alpaca",
 ) -> pd.DataFrame:
-    requested_symbols = list(symbols or DEFAULT_FOREX_SYMBOLS)
+    requested_symbols = list(symbols or DEFAULT_ALPACA_SYMBOLS)
     frames: list[pd.DataFrame] = []
     failures: list[str] = []
 
@@ -32,7 +32,7 @@ def build_forex_dataset(
 
     if not frames:
         joined = " | ".join(failures) if failures else "Unbekannter Fehler."
-        raise RuntimeError(f"Es konnten keine Forex-Daten aufgebaut werden. {joined}")
+        raise RuntimeError(f"Es konnten keine Marktdaten aufgebaut werden. {joined}")
 
     dataset = pd.concat(frames, ignore_index=True)
     dataset = dataset.sort_values(["symbol", "time"]).reset_index(drop=True)

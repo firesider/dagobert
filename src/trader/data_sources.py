@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import yfinance as yf
 
+from trader.alpaca import AlpacaClient, AlpacaError
 from trader.config import (
     MT5_TIMEFRAME_ATTR_MAP,
     RESAMPLE_RULE_MAP,
@@ -130,16 +131,30 @@ class MetaTrader5DataSource:
             raise DataSourceError(str(exc)) from exc
 
 
+class AlpacaDataSource:
+    source_name = "alpaca"
+
+    def fetch(self, request: FetchRequest) -> pd.DataFrame:
+        try:
+            client = AlpacaClient.from_env()
+            return client.copy_rates(request.symbol, request.timeframe, request.bars)
+        except AlpacaError as exc:
+            raise DataSourceError(str(exc)) from exc
+
+
 def fetch_ohlcv(request: FetchRequest, source: str = "auto") -> pd.DataFrame:
     """Resolve the preferred market data source with automatic fallback."""
-    if source not in {"auto", "mt5", "yfinance"}:
-        raise ValueError("source muss 'auto', 'mt5' oder 'yfinance' sein.")
+    if source not in {"auto", "mt5", "yfinance", "alpaca"}:
+        raise ValueError("source muss 'auto', 'mt5', 'yfinance' oder 'alpaca' sein.")
 
     if source == "yfinance":
         return YFinanceDataSource().fetch(request)
 
     if source == "mt5":
         return MetaTrader5DataSource().fetch(request)
+
+    if source == "alpaca":
+        return AlpacaDataSource().fetch(request)
 
     mt5_source = MetaTrader5DataSource()
     errors: list[str] = []

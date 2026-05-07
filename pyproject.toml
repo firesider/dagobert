@@ -20,6 +20,12 @@ pytest = "^8.3.5"
 [tool.poetry.group.mt5.dependencies]
 MetaTrader5 = { version = "^5.0.5735", markers = "sys_platform == 'win32'" }
 
+[tool.poetry.group.alpaca.dependencies]
+alpaca-py = "^0.43.0"
+
+[tool.poetry.group.docs.dependencies]
+matplotlib = "^3.9"
+
 [tool.poetry.scripts]
 trader = "trader.cli:main"
 

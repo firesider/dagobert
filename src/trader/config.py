@@ -5,18 +5,33 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from math import ceil
 
-DEFAULT_FOREX_SYMBOLS = [
-    "EURUSD",
-    "GBPUSD",
-    "USDJPY",
-    "USDCHF",
-    "AUDUSD",
-    "USDCAD",
-    "NZDUSD",
-    "EURGBP",
-    "EURJPY",
-    "GBPJPY",
+# Forex-Defaults sind aktuell deaktiviert (Repo-Fokus auf Alpaca/US-Aktien).
+# DEFAULT_FOREX_SYMBOLS = [
+#     "EURUSD",
+#     "GBPUSD",
+#     "USDJPY",
+#     "USDCHF",
+#     "AUDUSD",
+#     "USDCAD",
+#     "NZDUSD",
+#     "EURGBP",
+#     "EURJPY",
+#     "GBPJPY",
+# ]
+
+DEFAULT_ALPACA_SYMBOLS = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "GOOGL",
+    "META",
+    "TSLA",
+    "SPY",
+    "QQQ",
 ]
+
+# Rueckwaertskompatibler Alias, damit bestehende Importe nicht brechen.
+DEFAULT_FOREX_SYMBOLS = DEFAULT_ALPACA_SYMBOLS
 
 SUPPORTED_TIMEFRAMES = ("5m", "15m", "1h", "4h", "1d")
 
@@ -54,6 +69,14 @@ MT5_TIMEFRAME_ATTR_MAP = {
     "1h": "TIMEFRAME_H1",
     "4h": "TIMEFRAME_H4",
     "1d": "TIMEFRAME_D1",
+}
+
+ALPACA_TIMEFRAME_MAP = {
+    "5m": (5, "Minute"),
+    "15m": (15, "Minute"),
+    "1h": (1, "Hour"),
+    "4h": (4, "Hour"),
+    "1d": (1, "Day"),
 }
 
 

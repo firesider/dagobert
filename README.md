@@ -1,5 +1,9 @@
 # Trader Workbench
 
+> **Datenfluss-Dokumentation:** [DATA_FLOW.md](./DATA_FLOW.md) erklaert Schritt fuer Schritt, woher alle Daten kommen, wie sie transformiert werden und wo sie landen — inklusive Mermaid-Diagramme, Schema-Tabellen und Beispielcharts.
+
+> **Status (Mai 2026):** Der Repo-Fokus liegt aktuell auf **Alpaca / US-Aktien und Crypto**. Der Forex-Pfad (MetaTrader 5, yfinance, FX-Defaults, `mt5-*`-CLI-Befehle) ist **deaktiviert/auskommentiert** und kann durch Uncommenten der entsprechenden Abschnitte in `src/trader/cli.py` und `src/trader/config.py` reaktiviert werden. Die Dokumentation unten beschreibt teilweise noch den FX-Stand und ist als Hintergrund zu verstehen, nicht als aktive Anleitung.
+
 `trader` ist jetzt kein reines Forex-Feature-Skript mehr, sondern ein kleines, praxisnahes Trading-Repo fuer:
 
 - historische Marktdaten
@@ -377,7 +381,43 @@ Die Datenquellenlogik ist:
 
 - `source=mt5`: nur MT5
 - `source=yfinance`: nur Yahoo Finance
-- `source=auto`: zuerst MT5, sonst Fallback auf `yfinance`
+- `source=alpaca`: nur Alpaca (US-Aktien und Crypto)
+- `source=auto`: zuerst MT5, sonst Fallback auf `yfinance` (Alpaca ist bewusst nicht Teil des Auto-Pfads)
+
+## Alpaca als optionale Datenquelle
+
+Alpaca (https://app.alpaca.markets/) ist als dritte, optionale Datenquelle eingebunden. Sie ist explizit fuer US-Aktien und Crypto gedacht und hat **kein Forex** im Angebot. Deshalb:
+
+- `--source alpaca` ist nicht Teil der `auto`-Fallback-Kette.
+- Die `mt5-*`-CLI-Befehle haben kein Alpaca-Pendant. `order_check`, `order_calc_margin` und `order_calc_profit` existieren bei Alpaca nicht.
+- Die Standardliste `DEFAULT_ALPACA_SYMBOLS` enthaelt US-Aktien (AAPL, MSFT, NVDA, GOOGL, META, TSLA, SPY, QQQ); Crypto-Paare wie `BTC/USD` musst du via `--symbols` setzen.
+
+Installation der optionalen Gruppe:
+
+```bash
+poetry install --with dev,alpaca
+```
+
+Die `alpaca-py`-Bibliothek ist im Gegensatz zu `MetaTrader5` plattformunabhaengig und laeuft auch auf macOS und Linux.
+
+Environment-Variablen:
+
+```bash
+export ALPACA_API_KEY_ID="your-key-id"
+export ALPACA_API_SECRET_KEY="your-secret"
+export ALPACA_PAPER="true"
+export ALPACA_DATA_FEED="iex"
+```
+
+Beispiele:
+
+```bash
+trader dataset  --source alpaca --symbols AAPL SPY     --timeframe 1h --bars 500
+trader signals  --source alpaca --symbols AAPL         --timeframe 1d --bars 1000 --strategy breakout
+trader backtest --source alpaca --symbols AAPL SPY MSFT --timeframe 1d --bars 1500 --strategy ema_rsi_pullback
+```
+
+Crypto-Symbole bei Alpaca verwenden den Slash-Stil `BASE/QUOTE`, z. B. `BTC/USD` oder `ETH/USD`. Forex-Symbole wie `EURUSD` werden Alpaca-seitig nicht erkannt; benutze dafuer weiterhin `--source mt5` oder `--source yfinance`.
 
 ## Was die Feature-Pipeline erzeugt
 
@@ -629,10 +669,10 @@ print(frame.tail())
 ### Features und Signale in Python
 
 ```python
-from trader.pipeline import build_forex_dataset
+from trader.pipeline import build_dataset
 from trader.strategies import StrategyConfig, build_signal_frame, latest_signals
 
-dataset = build_forex_dataset(["EURUSD", "GBPUSD"], timeframe="1h", bars=2000, source="auto")
+dataset = build_dataset(["AAPL", "SPY"], timeframe="1h", bars=2000, source="alpaca")
 signals = build_signal_frame(dataset, StrategyConfig(strategy="ema_rsi_pullback"))
 print(latest_signals(signals))
 ```

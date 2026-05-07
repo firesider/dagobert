@@ -10,27 +10,30 @@ from typing import Any
 
 import pandas as pd
 
+from trader.alpaca import AlpacaError
 from trader.backtest import BacktestConfig, run_backtest
-from trader.config import DEFAULT_FOREX_SYMBOLS, SUPPORTED_TIMEFRAMES
-from trader.mt5 import MetaTrader5Client, Mt5Error
-from trader.pipeline import build_forex_dataset, save_frame, save_latest_snapshot
-from trader.risk import PositionSizingInput, position_size_from_stop
+from trader.config import DEFAULT_ALPACA_SYMBOLS, SUPPORTED_TIMEFRAMES
+# Forex-/MT5-Pfad ist aktuell deaktiviert. Modul bleibt importierbar fuer Tests.
+# from trader.mt5 import MetaTrader5Client, Mt5Error
+from trader.pipeline import build_dataset, save_frame, save_latest_snapshot
+# from trader.risk import PositionSizingInput, position_size_from_stop  # nur fuer mt5-check-order benoetigt
 from trader.strategies import SUPPORTED_STRATEGIES, StrategyConfig, build_signal_frame, latest_signals
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Trader Workbench fuer Forex-Research, Signale, Backtests und MetaTrader 5."
+        description="Trader Workbench fuer Research, Signale und Backtests auf Basis von Alpaca."
     )
     subparsers = parser.add_subparsers(dest="command")
 
     _add_dataset_parser(subparsers)
     _add_signals_parser(subparsers)
     _add_backtest_parser(subparsers)
-    _add_mt5_account_parser(subparsers)
-    _add_mt5_symbols_parser(subparsers)
-    _add_mt5_quote_parser(subparsers)
-    _add_mt5_check_order_parser(subparsers)
+    # MT5-Subcommands sind aktuell deaktiviert (Repo-Fokus auf Alpaca):
+    # _add_mt5_account_parser(subparsers)
+    # _add_mt5_symbols_parser(subparsers)
+    # _add_mt5_quote_parser(subparsers)
+    # _add_mt5_check_order_parser(subparsers)
     return parser
 
 
@@ -50,22 +53,23 @@ def main(argv: list[str] | None = None) -> int:
             return _run_signals_command(args)
         if args.command == "backtest":
             return _run_backtest_command(args)
-        if args.command == "mt5-account":
-            return _run_mt5_account_command(args)
-        if args.command == "mt5-symbols":
-            return _run_mt5_symbols_command(args)
-        if args.command == "mt5-quote":
-            return _run_mt5_quote_command(args)
-        if args.command == "mt5-check-order":
-            return _run_mt5_check_order_command(args)
-    except (RuntimeError, ValueError, Mt5Error) as exc:
+        # MT5-Befehle deaktiviert:
+        # if args.command == "mt5-account":
+        #     return _run_mt5_account_command(args)
+        # if args.command == "mt5-symbols":
+        #     return _run_mt5_symbols_command(args)
+        # if args.command == "mt5-quote":
+        #     return _run_mt5_quote_command(args)
+        # if args.command == "mt5-check-order":
+        #     return _run_mt5_check_order_command(args)
+    except (RuntimeError, ValueError, AlpacaError) as exc:
         raise SystemExit(str(exc)) from exc
 
     raise SystemExit("Unbekannter CLI-Befehl.")
 
 
 def _run_dataset_command(args: argparse.Namespace) -> int:
-    dataset = build_forex_dataset(
+    dataset = build_dataset(
         symbols=args.symbols,
         timeframe=args.timeframe,
         bars=args.bars,
@@ -87,7 +91,7 @@ def _run_dataset_command(args: argparse.Namespace) -> int:
 
 
 def _run_signals_command(args: argparse.Namespace) -> int:
-    dataset = build_forex_dataset(
+    dataset = build_dataset(
         symbols=args.symbols,
         timeframe=args.timeframe,
         bars=args.bars,
@@ -108,7 +112,7 @@ def _run_signals_command(args: argparse.Namespace) -> int:
 
 
 def _run_backtest_command(args: argparse.Namespace) -> int:
-    dataset = build_forex_dataset(
+    dataset = build_dataset(
         symbols=args.symbols,
         timeframe=args.timeframe,
         bars=args.bars,
@@ -153,174 +157,176 @@ def _run_backtest_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_mt5_account_command(args: argparse.Namespace) -> int:
-    with MetaTrader5Client.from_env() as client:
-        account = client.account_info()
-        terminal = client.terminal_info()
-        positions = client.open_positions()
-        orders = client.active_orders()
-
-    payload = {
-        "account": account,
-        "terminal": terminal,
-        "open_positions": len(positions),
-        "active_orders": len(orders),
-    }
-    if args.output:
-        _write_json(Path(args.output), payload)
-
-    print(
-        "Account:"
-        f" login={account.get('login')} server={account.get('server')} "
-        f"balance={account.get('balance')} equity={account.get('equity')} "
-        f"margin_free={account.get('margin_free')}"
-    )
-    print(
-        "Terminal:"
-        f" company={terminal.get('company')} build={terminal.get('build')} connected={terminal.get('connected')}"
-    )
-    print(f"Open positions: {len(positions)}")
-    print(f"Active orders: {len(orders)}")
-    return 0
-
-
-def _run_mt5_symbols_command(args: argparse.Namespace) -> int:
-    with MetaTrader5Client.from_env() as client:
-        frame = client.symbols(group=args.group)
-
-    if args.contains:
-        needle = args.contains.lower()
-        mask = frame["name"].astype(str).str.lower().str.contains(needle, regex=False)
-        mask |= frame["path"].astype(str).str.lower().str.contains(needle, regex=False)
-        mask |= frame["description"].astype(str).str.lower().str.contains(needle, regex=False)
-        frame = frame[mask]
-
-    if args.asset_class:
-        frame = frame[frame["asset_class"] == args.asset_class]
-
-    frame = frame.reset_index(drop=True)
-    if args.limit:
-        frame = frame.head(args.limit)
-
-    summary = (
-        frame.groupby("asset_class", as_index=False)
-        .size()
-        .rename(columns={"size": "count"})
-        .sort_values("count", ascending=False)
-    )
-
-    if args.output:
-        save_frame(frame, Path(args.output))
-
-    print(f"Symbole gefunden: {len(frame)}")
-    if not summary.empty:
-        print(summary.to_string(index=False))
-
-    columns = [column for column in ("name", "asset_class", "path", "description") if column in frame.columns]
-    if columns and not frame.empty:
-        print(frame[columns].head(args.preview).to_string(index=False))
-    return 0
-
-
-def _run_mt5_quote_command(args: argparse.Namespace) -> int:
-    with MetaTrader5Client.from_env() as client:
-        info = client.symbol_info(args.symbol)
-        quote = client.quote(args.symbol)
-
-    payload = {"symbol_info": info, "quote": quote}
-    if args.output:
-        _write_json(Path(args.output), payload)
-
-    print(
-        f"{info.get('name')} [{info.get('asset_class')}] "
-        f"bid={quote.get('bid')} ask={quote.get('ask')} last={quote.get('last')}"
-    )
-    print(
-        f"path={info.get('path')} contract_size={info.get('trade_contract_size')} "
-        f"volume_step={info.get('volume_step')} digits={info.get('digits')}"
-    )
-    return 0
-
-
-def _run_mt5_check_order_command(args: argparse.Namespace) -> int:
-    with MetaTrader5Client.from_env() as client:
-        info = client.symbol_info(args.symbol)
-        quote = client.quote(args.symbol)
-        entry_price = args.entry_price or (quote["ask"] if args.side == "buy" else quote["bid"])
-
-        volume = args.volume
-        if volume is None:
-            if args.equity is None or args.stop_loss_price is None:
-                raise ValueError(
-                    "Ohne --volume werden zusaetzlich --equity und --stop-loss-price benoetigt."
-                )
-            volume = position_size_from_stop(
-                PositionSizingInput(
-                    equity=args.equity,
-                    risk_fraction=args.risk_fraction,
-                    entry_price=entry_price,
-                    stop_price=args.stop_loss_price,
-                    contract_size=float(info.get("trade_contract_size") or 1.0),
-                    volume_step=float(info.get("volume_step") or 0.01),
-                    volume_min=float(info.get("volume_min") or 0.01),
-                    volume_max=float(info.get("volume_max")) if info.get("volume_max") else None,
-                )
-            )
-
-        margin_estimate = client.estimate_margin(args.symbol, args.side, volume, entry_price)
-        order_check = client.check_market_order(
-            symbol=args.symbol,
-            side=args.side,
-            volume=volume,
-            stop_loss=args.stop_loss_price,
-            take_profit=args.take_profit_price,
-            deviation=args.deviation,
-            comment=args.comment,
-            magic=args.magic,
-        )
-
-        risk_at_stop = None
-        reward_at_take_profit = None
-        if args.stop_loss_price is not None:
-            risk_at_stop = client.estimate_profit(
-                args.symbol,
-                args.side,
-                volume,
-                entry_price,
-                args.stop_loss_price,
-            )
-        if args.take_profit_price is not None:
-            reward_at_take_profit = client.estimate_profit(
-                args.symbol,
-                args.side,
-                volume,
-                entry_price,
-                args.take_profit_price,
-            )
-
-    payload = {
-        "symbol": info.get("name"),
-        "asset_class": info.get("asset_class"),
-        "entry_price": entry_price,
-        "volume": volume,
-        "margin_estimate": margin_estimate,
-        "risk_at_stop": risk_at_stop,
-        "reward_at_take_profit": reward_at_take_profit,
-        "order_check": order_check,
-    }
-    if args.output:
-        _write_json(Path(args.output), payload)
-
-    print(
-        f"{info.get('name')} {args.side} volume={volume} entry={entry_price} "
-        f"margin_estimate={margin_estimate}"
-    )
-    if risk_at_stop is not None:
-        print(f"risk_at_stop: {risk_at_stop}")
-    if reward_at_take_profit is not None:
-        print(f"reward_at_take_profit: {reward_at_take_profit}")
-    print(f"retcode: {order_check.get('retcode')}")
-    return 0
+# --- MT5-Befehle deaktiviert (Repo-Fokus auf Alpaca). Reaktivieren zusammen mit den MT5-Imports oben. ---
+# def _run_mt5_account_command(args: argparse.Namespace) -> int:
+#     with MetaTrader5Client.from_env() as client:
+#         account = client.account_info()
+#         terminal = client.terminal_info()
+#         positions = client.open_positions()
+#         orders = client.active_orders()
+#
+#     payload = {
+#         "account": account,
+#         "terminal": terminal,
+#         "open_positions": len(positions),
+#         "active_orders": len(orders),
+#     }
+#     if args.output:
+#         _write_json(Path(args.output), payload)
+#
+#     print(
+#         "Account:"
+#         f" login={account.get('login')} server={account.get('server')} "
+#         f"balance={account.get('balance')} equity={account.get('equity')} "
+#         f"margin_free={account.get('margin_free')}"
+#     )
+#     print(
+#         "Terminal:"
+#         f" company={terminal.get('company')} build={terminal.get('build')} connected={terminal.get('connected')}"
+#     )
+#     print(f"Open positions: {len(positions)}")
+#     print(f"Active orders: {len(orders)}")
+#     return 0
+#
+#
+# def _run_mt5_symbols_command(args: argparse.Namespace) -> int:
+#     with MetaTrader5Client.from_env() as client:
+#         frame = client.symbols(group=args.group)
+#
+#     if args.contains:
+#         needle = args.contains.lower()
+#         mask = frame["name"].astype(str).str.lower().str.contains(needle, regex=False)
+#         mask |= frame["path"].astype(str).str.lower().str.contains(needle, regex=False)
+#         mask |= frame["description"].astype(str).str.lower().str.contains(needle, regex=False)
+#         frame = frame[mask]
+#
+#     if args.asset_class:
+#         frame = frame[frame["asset_class"] == args.asset_class]
+#
+#     frame = frame.reset_index(drop=True)
+#     if args.limit:
+#         frame = frame.head(args.limit)
+#
+#     summary = (
+#         frame.groupby("asset_class", as_index=False)
+#         .size()
+#         .rename(columns={"size": "count"})
+#         .sort_values("count", ascending=False)
+#     )
+#
+#     if args.output:
+#         save_frame(frame, Path(args.output))
+#
+#     print(f"Symbole gefunden: {len(frame)}")
+#     if not summary.empty:
+#         print(summary.to_string(index=False))
+#
+#     columns = [column for column in ("name", "asset_class", "path", "description") if column in frame.columns]
+#     if columns and not frame.empty:
+#         print(frame[columns].head(args.preview).to_string(index=False))
+#     return 0
+#
+#
+# def _run_mt5_quote_command(args: argparse.Namespace) -> int:
+#     with MetaTrader5Client.from_env() as client:
+#         info = client.symbol_info(args.symbol)
+#         quote = client.quote(args.symbol)
+#
+#     payload = {"symbol_info": info, "quote": quote}
+#     if args.output:
+#         _write_json(Path(args.output), payload)
+#
+#     print(
+#         f"{info.get('name')} [{info.get('asset_class')}] "
+#         f"bid={quote.get('bid')} ask={quote.get('ask')} last={quote.get('last')}"
+#     )
+#     print(
+#         f"path={info.get('path')} contract_size={info.get('trade_contract_size')} "
+#         f"volume_step={info.get('volume_step')} digits={info.get('digits')}"
+#     )
+#     return 0
+#
+#
+# def _run_mt5_check_order_command(args: argparse.Namespace) -> int:
+#     with MetaTrader5Client.from_env() as client:
+#         info = client.symbol_info(args.symbol)
+#         quote = client.quote(args.symbol)
+#         entry_price = args.entry_price or (quote["ask"] if args.side == "buy" else quote["bid"])
+#
+#         volume = args.volume
+#         if volume is None:
+#             if args.equity is None or args.stop_loss_price is None:
+#                 raise ValueError(
+#                     "Ohne --volume werden zusaetzlich --equity und --stop-loss-price benoetigt."
+#                 )
+#             volume = position_size_from_stop(
+#                 PositionSizingInput(
+#                     equity=args.equity,
+#                     risk_fraction=args.risk_fraction,
+#                     entry_price=entry_price,
+#                     stop_price=args.stop_loss_price,
+#                     contract_size=float(info.get("trade_contract_size") or 1.0),
+#                     volume_step=float(info.get("volume_step") or 0.01),
+#                     volume_min=float(info.get("volume_min") or 0.01),
+#                     volume_max=float(info.get("volume_max")) if info.get("volume_max") else None,
+#                 )
+#             )
+#
+#         margin_estimate = client.estimate_margin(args.symbol, args.side, volume, entry_price)
+#         order_check = client.check_market_order(
+#             symbol=args.symbol,
+#             side=args.side,
+#             volume=volume,
+#             stop_loss=args.stop_loss_price,
+#             take_profit=args.take_profit_price,
+#             deviation=args.deviation,
+#             comment=args.comment,
+#             magic=args.magic,
+#         )
+#
+#         risk_at_stop = None
+#         reward_at_take_profit = None
+#         if args.stop_loss_price is not None:
+#             risk_at_stop = client.estimate_profit(
+#                 args.symbol,
+#                 args.side,
+#                 volume,
+#                 entry_price,
+#                 args.stop_loss_price,
+#             )
+#         if args.take_profit_price is not None:
+#             reward_at_take_profit = client.estimate_profit(
+#                 args.symbol,
+#                 args.side,
+#                 volume,
+#                 entry_price,
+#                 args.take_profit_price,
+#             )
+#
+#     payload = {
+#         "symbol": info.get("name"),
+#         "asset_class": info.get("asset_class"),
+#         "entry_price": entry_price,
+#         "volume": volume,
+#         "margin_estimate": margin_estimate,
+#         "risk_at_stop": risk_at_stop,
+#         "reward_at_take_profit": reward_at_take_profit,
+#         "order_check": order_check,
+#     }
+#     if args.output:
+#         _write_json(Path(args.output), payload)
+#
+#     print(
+#         f"{info.get('name')} {args.side} volume={volume} entry={entry_price} "
+#         f"margin_estimate={margin_estimate}"
+#     )
+#     if risk_at_stop is not None:
+#         print(f"risk_at_stop: {risk_at_stop}")
+#     if reward_at_take_profit is not None:
+#         print(f"reward_at_take_profit: {reward_at_take_profit}")
+#     print(f"retcode: {order_check.get('retcode')}")
+#     return 0
+# --- Ende deaktivierter MT5-Befehle ---
 
 
 def _strategy_config_from_args(args: argparse.Namespace) -> StrategyConfig:
@@ -337,12 +343,12 @@ def _strategy_config_from_args(args: argparse.Namespace) -> StrategyConfig:
 def _add_dataset_parser(subparsers) -> None:
     parser = subparsers.add_parser(
         "dataset",
-        help="Lade Forex-Marktdaten und baue das Indikator-Feature-Set.",
+        help="Lade Marktdaten via Alpaca und baue das Indikator-Feature-Set.",
     )
     _add_market_data_arguments(parser)
     parser.add_argument(
         "--output",
-        default="data/forex_indicators.parquet",
+        default="data/dataset.parquet",
         help="Zielpfad fuer das vollstaendige Feature-Set",
     )
 
@@ -382,77 +388,79 @@ def _add_backtest_parser(subparsers) -> None:
     )
 
 
-def _add_mt5_account_parser(subparsers) -> None:
-    parser = subparsers.add_parser(
-        "mt5-account",
-        help="Lese Kontoinformationen, Terminal-Infos, offene Positionen und Orders aus.",
-    )
-    parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
-
-
-def _add_mt5_symbols_parser(subparsers) -> None:
-    parser = subparsers.add_parser(
-        "mt5-symbols",
-        help="Liste und klassifiziere die bei deinem Broker verfuegbaren MT5-Symbole.",
-    )
-    parser.add_argument("--group", help='MT5 group-Filter wie "*FX*" oder "*, !EUR"')
-    parser.add_argument("--contains", help="Filter fuer Name, Pfad oder Beschreibung")
-    parser.add_argument(
-        "--asset-class",
-        choices=[
-            "forex",
-            "crypto",
-            "metals",
-            "energy",
-            "futures",
-            "indices",
-            "etf",
-            "bonds",
-            "options",
-            "stocks",
-            "commodities",
-            "unknown",
-        ],
-    )
-    parser.add_argument("--limit", type=int, help="Begrenze die Ergebnismenge")
-    parser.add_argument("--preview", type=int, default=20, help="Anzahl Zeilen fuer die Terminal-Vorschau")
-    parser.add_argument("--output", help="CSV/Parquet/JSON Zielpfad")
-
-
-def _add_mt5_quote_parser(subparsers) -> None:
-    parser = subparsers.add_parser(
-        "mt5-quote",
-        help="Lese Tick- und Symbolinformationen fuer ein MT5-Symbol.",
-    )
-    parser.add_argument("symbol", help="Beispiel: EURUSD, XAUUSD, GER40.cash")
-    parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
-
-
-def _add_mt5_check_order_parser(subparsers) -> None:
-    parser = subparsers.add_parser(
-        "mt5-check-order",
-        help="Baue einen Market-Order-Request und pruefe ihn via MT5 order_check().",
-    )
-    parser.add_argument("symbol", help="MT5-Symbol")
-    parser.add_argument("side", choices=["buy", "sell"])
-    parser.add_argument("--volume", type=float, help="Lot-Groesse. Wenn nicht gesetzt, wird sie berechnet.")
-    parser.add_argument("--equity", type=float, help="Kontokapital fuer automatische Groessenberechnung")
-    parser.add_argument("--risk-fraction", type=float, default=0.01)
-    parser.add_argument("--entry-price", type=float, help="Optional. Sonst aktueller Bid/Ask.")
-    parser.add_argument("--stop-loss-price", type=float)
-    parser.add_argument("--take-profit-price", type=float)
-    parser.add_argument("--deviation", type=int, default=20)
-    parser.add_argument("--magic", type=int, default=234000)
-    parser.add_argument("--comment", default="trader-order-check")
-    parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
+# --- MT5-Subparser deaktiviert (Repo-Fokus auf Alpaca). ---
+# def _add_mt5_account_parser(subparsers) -> None:
+#     parser = subparsers.add_parser(
+#         "mt5-account",
+#         help="Lese Kontoinformationen, Terminal-Infos, offene Positionen und Orders aus.",
+#     )
+#     parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
+#
+#
+# def _add_mt5_symbols_parser(subparsers) -> None:
+#     parser = subparsers.add_parser(
+#         "mt5-symbols",
+#         help="Liste und klassifiziere die bei deinem Broker verfuegbaren MT5-Symbole.",
+#     )
+#     parser.add_argument("--group", help='MT5 group-Filter wie "*FX*" oder "*, !EUR"')
+#     parser.add_argument("--contains", help="Filter fuer Name, Pfad oder Beschreibung")
+#     parser.add_argument(
+#         "--asset-class",
+#         choices=[
+#             "forex",
+#             "crypto",
+#             "metals",
+#             "energy",
+#             "futures",
+#             "indices",
+#             "etf",
+#             "bonds",
+#             "options",
+#             "stocks",
+#             "commodities",
+#             "unknown",
+#         ],
+#     )
+#     parser.add_argument("--limit", type=int, help="Begrenze die Ergebnismenge")
+#     parser.add_argument("--preview", type=int, default=20, help="Anzahl Zeilen fuer die Terminal-Vorschau")
+#     parser.add_argument("--output", help="CSV/Parquet/JSON Zielpfad")
+#
+#
+# def _add_mt5_quote_parser(subparsers) -> None:
+#     parser = subparsers.add_parser(
+#         "mt5-quote",
+#         help="Lese Tick- und Symbolinformationen fuer ein MT5-Symbol.",
+#     )
+#     parser.add_argument("symbol", help="Beispiel: EURUSD, XAUUSD, GER40.cash")
+#     parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
+#
+#
+# def _add_mt5_check_order_parser(subparsers) -> None:
+#     parser = subparsers.add_parser(
+#         "mt5-check-order",
+#         help="Baue einen Market-Order-Request und pruefe ihn via MT5 order_check().",
+#     )
+#     parser.add_argument("symbol", help="MT5-Symbol")
+#     parser.add_argument("side", choices=["buy", "sell"])
+#     parser.add_argument("--volume", type=float, help="Lot-Groesse. Wenn nicht gesetzt, wird sie berechnet.")
+#     parser.add_argument("--equity", type=float, help="Kontokapital fuer automatische Groessenberechnung")
+#     parser.add_argument("--risk-fraction", type=float, default=0.01)
+#     parser.add_argument("--entry-price", type=float, help="Optional. Sonst aktueller Bid/Ask.")
+#     parser.add_argument("--stop-loss-price", type=float)
+#     parser.add_argument("--take-profit-price", type=float)
+#     parser.add_argument("--deviation", type=int, default=20)
+#     parser.add_argument("--magic", type=int, default=234000)
+#     parser.add_argument("--comment", default="trader-order-check")
+#     parser.add_argument("--output", help="Optionaler JSON-Zielpfad")
+# --- Ende deaktivierter MT5-Subparser ---
 
 
 def _add_market_data_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--symbols",
         nargs="+",
-        default=DEFAULT_FOREX_SYMBOLS,
-        help="Forex-Symbole wie EURUSD GBPUSD USDJPY",
+        default=DEFAULT_ALPACA_SYMBOLS,
+        help="Alpaca-Symbole wie AAPL MSFT SPY oder Crypto-Paare wie BTC/USD",
     )
     parser.add_argument(
         "--timeframe",
@@ -468,9 +476,11 @@ def _add_market_data_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--source",
-        default="auto",
-        choices=["auto", "mt5", "yfinance"],
-        help="Bevorzugte Datenquelle. 'auto' probiert zuerst MT5 und faellt dann auf yfinance zurueck.",
+        default="alpaca",
+        choices=["alpaca"],
+        # Forex-Pfade (auto/mt5/yfinance) sind aktuell deaktiviert.
+        # choices=["auto", "mt5", "yfinance", "alpaca"],
+        help="Datenquelle. Aktuell nur Alpaca; MT5- und yfinance-Pfade sind deaktiviert.",
     )
 
 
