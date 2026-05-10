@@ -42,8 +42,12 @@ trader                                  # equivalent to `trader dataset`
 trader dataset --symbols AAPL SPY --timeframe 1h --bars 1500
 trader signals --symbols AAPL --strategy ema_rsi_pullback
 trader backtest --symbols AAPL SPY --strategy breakout --bars 3000
+trader dump-frames --symbols AAPL SPY BTC/USD --timeframe 1d --bars 500 --out-dir data/research
+jupyter notebook notebooks/exploration.ipynb    # explore the dumped frames
 python scripts/render_data_flow_charts.py    # regenerate DATA_FLOW.md charts in docs/img/ (needs `docs` group)
 ```
+
+`trader dump-frames` writes five parquet files into `--out-dir` (`ohlcv.parquet`, `indicators.parquet`, `signals.parquet`, `trades.parquet`, `equity.parquet`) — every stage of the research pipeline as a separate frame so you can iterate from a notebook without re-fetching. `src/trader/research.py` exposes `load_frames`, `summarize_trades`, and `plot_equity_curve` for the reload side; `notebooks/exploration.ipynb` is the canonical walkthrough.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`, and `pytest` on Python 3.11/3.12 for every push/PR.
 

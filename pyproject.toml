@@ -34,7 +34,7 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["Learning_Materials"]
+extend-exclude = ["Learning_Materials", "notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

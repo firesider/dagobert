@@ -15,6 +15,7 @@ from trader.alpaca import AlpacaError
 from trader.backtest import BacktestConfig, run_backtest
 from trader.config import DEFAULT_ALPACA_SYMBOLS, SUPPORTED_TIMEFRAMES
 from trader.pipeline import build_dataset, save_frame, save_latest_snapshot
+from trader.research import dump_frames
 from trader.strategies import (
     SUPPORTED_STRATEGIES,
     StrategyConfig,
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dataset_parser(subparsers)
     _add_signals_parser(subparsers)
     _add_backtest_parser(subparsers)
+    _add_dump_frames_parser(subparsers)
     return parser
 
 
@@ -54,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_signals_command(args)
         if args.command == "backtest":
             return _run_backtest_command(args)
+        if args.command == "dump-frames":
+            return _run_dump_frames_command(args)
     except (RuntimeError, ValueError, AlpacaError) as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -146,6 +150,24 @@ def _run_backtest_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_dump_frames_command(args: argparse.Namespace) -> int:
+    frames = dump_frames(
+        out_dir=args.out_dir,
+        symbols=args.symbols,
+        timeframe=args.timeframe,
+        bars=args.bars,
+        strategy_config=_strategy_config_from_args(args),
+    )
+    out = Path(args.out_dir)
+    print(f"Frames gespeichert in {out}:")
+    print(f"  ohlcv:      {len(frames.ohlcv)} Zeilen")
+    print(f"  indicators: {len(frames.indicators)} Zeilen")
+    print(f"  signals:    {len(frames.signals)} Zeilen")
+    print(f"  trades:     {len(frames.trades)} Zeilen")
+    print(f"  equity:     {len(frames.equity)} Zeilen")
+    return 0
+
+
 def _strategy_config_from_args(args: argparse.Namespace) -> StrategyConfig:
     return StrategyConfig(
         strategy=args.strategy,
@@ -204,6 +226,23 @@ def _add_backtest_parser(subparsers) -> None:
         "--output",
         default="data/backtest_equity.csv",
         help="Zielpfad fuer Equity-Kurve und Portfolio-Serie",
+    )
+
+
+def _add_dump_frames_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "dump-frames",
+        help=(
+            "Schreibe alle Pipeline-Stufen (OHLCV, Indikatoren, Signale, "
+            "Trades, Equity) als parquet fuer Notebook-Exploration."
+        ),
+    )
+    _add_market_data_arguments(parser)
+    _add_strategy_arguments(parser)
+    parser.add_argument(
+        "--out-dir",
+        default="data/research",
+        help="Zielordner fuer die fuenf parquet-Dateien",
     )
 
 
