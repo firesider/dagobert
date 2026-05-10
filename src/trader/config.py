@@ -2,23 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from math import ceil
-
-# Forex-Defaults sind aktuell deaktiviert (Repo-Fokus auf Alpaca/US-Aktien).
-# DEFAULT_FOREX_SYMBOLS = [
-#     "EURUSD",
-#     "GBPUSD",
-#     "USDJPY",
-#     "USDCHF",
-#     "AUDUSD",
-#     "USDCAD",
-#     "NZDUSD",
-#     "EURGBP",
-#     "EURJPY",
-#     "GBPJPY",
-# ]
-
 DEFAULT_ALPACA_SYMBOLS = [
     "AAPL",
     "MSFT",
@@ -30,9 +13,6 @@ DEFAULT_ALPACA_SYMBOLS = [
     "QQQ",
 ]
 
-# Rueckwaertskompatibler Alias, damit bestehende Importe nicht brechen.
-DEFAULT_FOREX_SYMBOLS = DEFAULT_ALPACA_SYMBOLS
-
 SUPPORTED_TIMEFRAMES = ("5m", "15m", "1h", "4h", "1d")
 
 TIMEFRAME_TO_MINUTES = {
@@ -41,34 +21,6 @@ TIMEFRAME_TO_MINUTES = {
     "1h": 60,
     "4h": 240,
     "1d": 1440,
-}
-
-YFINANCE_INTERVAL_MAP = {
-    "5m": "5m",
-    "15m": "15m",
-    "1h": "60m",
-    "4h": "60m",
-    "1d": "1d",
-}
-
-YFINANCE_LOOKBACK_CAP_DAYS = {
-    "5m": 59,
-    "15m": 59,
-    "1h": 729,
-    "4h": 729,
-    "1d": 3650,
-}
-
-RESAMPLE_RULE_MAP = {
-    "4h": "4h",
-}
-
-MT5_TIMEFRAME_ATTR_MAP = {
-    "5m": "TIMEFRAME_M5",
-    "15m": "TIMEFRAME_M15",
-    "1h": "TIMEFRAME_H1",
-    "4h": "TIMEFRAME_H4",
-    "1d": "TIMEFRAME_D1",
 }
 
 ALPACA_TIMEFRAME_MAP = {
@@ -81,11 +33,24 @@ ALPACA_TIMEFRAME_MAP = {
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Convert symbol input such as EUR/USD into EURUSD."""
-    cleaned = symbol.replace("/", "").replace(" ", "").upper()
-    if len(cleaned) != 6:
+    """Normalize a user-provided symbol string for Alpaca routing.
+
+    Accepts equity tickers (1-5 uppercase letters, e.g. ``AAPL``) and crypto
+    pairs (``BASE/QUOTE``, e.g. ``BTC/USD``). Strips whitespace and uppercases
+    the input.
+    """
+    cleaned = symbol.strip().upper().replace(" ", "")
+    if "/" in cleaned:
+        base, _, quote = cleaned.partition("/")
+        if not base or not quote or not base.isalpha() or not quote.isalpha():
+            raise ValueError(
+                f"Ungueltiges Crypto-Symbol '{symbol}'. Erwartet wird BASE/QUOTE wie BTC/USD."
+            )
+        return cleaned
+    if not cleaned.isalpha() or not 1 <= len(cleaned) <= 5:
         raise ValueError(
-            f"Ungueltiges Forex-Symbol '{symbol}'. Erwartet wird z. B. EURUSD oder EUR/USD."
+            f"Ungueltiges Symbol '{symbol}'. Erwartet wird ein 1-5 Zeichen langer "
+            "Ticker (AAPL, MSFT) oder ein Crypto-Paar (BTC/USD)."
         )
     return cleaned
 
@@ -99,23 +64,3 @@ def validate_timeframe(timeframe: str) -> str:
 
 def timeframe_to_minutes(timeframe: str) -> int:
     return TIMEFRAME_TO_MINUTES[validate_timeframe(timeframe)]
-
-
-def yfinance_symbol(symbol: str) -> str:
-    return f"{normalize_symbol(symbol)}=X"
-
-
-def estimate_yfinance_start(timeframe: str, bars: int) -> datetime:
-    """Estimate a conservative lookback window for Yahoo Finance downloads."""
-    tf = validate_timeframe(timeframe)
-    minutes = timeframe_to_minutes(tf)
-    raw_days = ceil((bars * minutes) / (24 * 60) * 1.4)
-    minimum_days = {
-        "5m": 7,
-        "15m": 14,
-        "1h": 60,
-        "4h": 180,
-        "1d": 365,
-    }[tf]
-    days = min(max(raw_days, minimum_days), YFINANCE_LOOKBACK_CAP_DAYS[tf])
-    return datetime.now(UTC) - timedelta(days=days)

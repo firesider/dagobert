@@ -1,8 +1,8 @@
 # Data Flow
 
-This document traces every piece of data that the `trader` workbench produces — where it originates, how it is transformed, and where it lands. It is written for the active **Alpaca** path; the parked MT5 / yfinance / Forex paths are mentioned only where they differ.
+This document traces every piece of data that the `trader` workbench produces — where it originates, how it is transformed, and where it lands. The active and only data path is **Alpaca**.
 
-> Status (May 2026): repo focus is Alpaca + US equities/crypto. The four `mt5-*` CLI subcommands and the yfinance source are commented out in `cli.py` but remain on disk for reactivation.
+> The repo previously also wrapped MetaTrader 5 and Yahoo Finance; those paths were removed. See `git log` for the historical implementation.
 
 ---
 
@@ -95,7 +95,7 @@ For crypto (`BTC/USD` etc.), Alpaca returns the same shape; `volume` is base-ass
 
 ## 4. Canonical OHLCV schema
 
-`_normalize_frame` (`src/trader/alpaca.py`) emits a fixed 12-column DataFrame. This schema is the contract every downstream stage relies on, and it is identical to what the parked yfinance / MT5 sources would emit so callers stay source-agnostic.
+`_normalize_frame` (`src/trader/alpaca.py`) emits a fixed 12-column DataFrame. This schema is the contract every downstream stage relies on. The three NA columns are kept so that any future broker-quote integration (or downstream consumer expecting them) can stay schema-compatible.
 
 | Column | Type | Source | Notes |
 |---|---|---|---|
@@ -105,9 +105,9 @@ For crypto (`BTC/USD` etc.), Alpaca returns the same shape; `volume` is base-ass
 | `low` | float | Alpaca | |
 | `close` | float | Alpaca | |
 | `volume` | float | Alpaca | Trade volume |
-| `tick_volume` | `pd.NA` | — | MT5 only; always NA for Alpaca |
-| `spread` | `pd.NA` | — | MT5 only; always NA for Alpaca |
-| `real_volume` | `pd.NA` | — | MT5 only; always NA for Alpaca |
+| `tick_volume` | `pd.NA` | — | Reserved; not provided by Alpaca |
+| `spread` | `pd.NA` | — | Reserved; not provided by Alpaca |
+| `real_volume` | `pd.NA` | — | Reserved; not provided by Alpaca |
 | `symbol` | str | request | Verbatim — `AAPL`, `BTC/USD`, etc. |
 | `timeframe` | str | request | One of `5m`, `15m`, `1h`, `4h`, `1d` |
 | `data_source` | str | constant | `"alpaca"` |
@@ -132,7 +132,7 @@ flowchart TB
 
 ### 5.1 Volume
 
-For Alpaca stocks `volume` is real, so `analysis_volume = volume` and `volume_is_proxy = False`. The proxy fires only when neither real nor tick volume is available (the parked FX path).
+For Alpaca stocks `volume` is real, so `analysis_volume = volume` and `volume_is_proxy = False`. The proxy fires only when neither real nor tick volume is available — currently no live data path produces that, but the branch is kept for downstream callers that may feed in volumeless OHLCV.
 
 | Column | Description |
 |---|---|
@@ -452,15 +452,3 @@ The May 6, 2026 daily AAPL close from the smoke run we executed:
 | Output writer | `src/trader/pipeline.py` → `save_frame`, `save_latest_snapshot` |
 | Chart renderer | `scripts/render_data_flow_charts.py` |
 | Env vars | `src/trader/alpaca.py` → `AlpacaConnectionSettings.from_env` |
-
----
-
-## 12. Notes on the parked Forex path
-
-The repo retains the MT5 client (`src/trader/mt5.py`) and the yfinance branch in `data_sources.py`. They are unreachable from the CLI today (the four `mt5-*` subcommands and the `--source` choices for `mt5` / `yfinance` / `auto` are commented out). When reactivated they emit the same canonical 12-column schema — the only differences being:
-
-- MT5 fills `tick_volume` and `spread` with real values; `real_volume` for some symbols only.
-- yfinance fills `volume` only; `tick_volume` / `spread` / `real_volume` are `pd.NA`.
-- yfinance has no native `4h`, so `RESAMPLE_RULE_MAP` resamples it from `60m` (Alpaca and MT5 have native `4h`).
-
-Everything downstream of `_normalize_frame` is source-agnostic and would not need changes.

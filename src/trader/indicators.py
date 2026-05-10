@@ -1,4 +1,4 @@
-"""Indicator engineering for Forex OHLCV data."""
+"""Indicator engineering for OHLCV data."""
 
 from __future__ import annotations
 

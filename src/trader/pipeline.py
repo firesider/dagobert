@@ -16,7 +16,6 @@ def build_dataset(
     symbols: Iterable[str] | None = None,
     timeframe: str = "1h",
     bars: int = 1500,
-    source: str = "alpaca",
 ) -> pd.DataFrame:
     requested_symbols = list(symbols or DEFAULT_ALPACA_SYMBOLS)
     frames: list[pd.DataFrame] = []
@@ -24,12 +23,10 @@ def build_dataset(
 
     for symbol in requested_symbols:
         try:
-            raw = fetch_ohlcv(
-                FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars), source=source
-            )
+            raw = fetch_ohlcv(FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars))
             features = build_indicator_frame(raw)
             frames.append(features)
-        except Exception as exc:  # pragma: no cover - keeps CLI robust across mixed data sources
+        except Exception as exc:  # pragma: no cover - keeps CLI robust across data hiccups
             failures.append(f"{symbol}: {exc}")
 
     if not frames:
