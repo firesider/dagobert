@@ -22,6 +22,15 @@ from trader.strategies import (
     build_signal_frame,
     latest_signals,
 )
+from trader.sweep import (
+    CRYPTO_COHORT,
+    EQUITY_COHORT,
+    SweepConfig,
+    SweepGrid,
+    persist_results,
+    pick_winners,
+    run_sweep,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_signals_parser(subparsers)
     _add_backtest_parser(subparsers)
     _add_dump_frames_parser(subparsers)
+    _add_sweep_parser(subparsers)
     return parser
 
 
@@ -58,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_backtest_command(args)
         if args.command == "dump-frames":
             return _run_dump_frames_command(args)
+        if args.command == "sweep":
+            return _run_sweep_command(args)
     except (RuntimeError, ValueError, AlpacaError) as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -168,6 +180,63 @@ def _run_dump_frames_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_sweep_command(args: argparse.Namespace) -> int:
+    grid = SweepGrid.quick() if args.quick else SweepGrid()
+    timeframes: tuple[str, ...] = tuple(args.timeframes)
+
+    if args.quick:
+        equity_symbols = (args.equity_symbols or list(EQUITY_COHORT))[:2]
+        crypto_symbols = (args.crypto_symbols or list(CRYPTO_COHORT))[:1]
+    else:
+        equity_symbols = tuple(args.equity_symbols or EQUITY_COHORT)
+        crypto_symbols = tuple(args.crypto_symbols or CRYPTO_COHORT)
+
+    config = SweepConfig(
+        grid=grid,
+        timeframes=timeframes,
+        equity_symbols=tuple(equity_symbols),
+        crypto_symbols=tuple(crypto_symbols),
+        in_sample_fraction=args.in_sample_fraction,
+        min_trades=args.min_trades,
+    )
+
+    cells = len(grid.cells())
+    total_runs = cells * len(timeframes) * (len(config.equity_symbols) + len(config.crypto_symbols))
+    print(
+        f"Starte Sweep: {cells} Zellen × {len(timeframes)} Timeframes × "
+        f"{len(config.equity_symbols) + len(config.crypto_symbols)} Symbole = {total_runs} Backtests."
+    )
+
+    results = run_sweep(config)
+    if results.empty:
+        raise SystemExit(
+            "Sweep lieferte keine Ergebnisse — vermutlich konnten keine Daten geladen werden."
+        )
+
+    winners = pick_winners(results, min_trades=args.min_trades)
+    results_path, winners_path = persist_results(results, winners, args.out_dir)
+
+    print(f"Ergebnisse: {results_path}")
+    print(f"Winners:    {winners_path}")
+    print(f"Eligible cells: {len(winners)}")
+    if not winners.empty:
+        print(
+            winners[
+                [
+                    "cohort",
+                    "timeframe",
+                    "pullback_tolerance",
+                    "long_rsi_floor",
+                    "atr_pct_floor",
+                    "atr_pct_ceiling",
+                    "oos_sharpe_mean",
+                    "oos_trade_count_mean",
+                ]
+            ].to_string(index=False)
+        )
+    return 0
+
+
 def _strategy_config_from_args(args: argparse.Namespace) -> StrategyConfig:
     return StrategyConfig(
         strategy=args.strategy,
@@ -226,6 +295,57 @@ def _add_backtest_parser(subparsers) -> None:
         "--output",
         default="data/backtest_equity.csv",
         help="Zielpfad fuer Equity-Kurve und Portfolio-Serie",
+    )
+
+
+def _add_sweep_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "sweep",
+        help=(
+            "Grid-Suche fuer StrategyConfig-Parameter auf Alpaca-Historie. "
+            "Schreibt eine parquet-Tabelle aller Zellen plus winners.json."
+        ),
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="data/sweep_results",
+        help="Zielordner fuer parquet- und winners-Dateien.",
+    )
+    parser.add_argument(
+        "--timeframes",
+        nargs="+",
+        default=["1d", "1h"],
+        choices=list(SUPPORTED_TIMEFRAMES),
+        help="Welche Timeframes evaluiert werden.",
+    )
+    parser.add_argument(
+        "--equity-symbols",
+        nargs="+",
+        default=None,
+        help="Override fuer das Equity-Cohort (Default = trader.sweep.EQUITY_COHORT).",
+    )
+    parser.add_argument(
+        "--crypto-symbols",
+        nargs="+",
+        default=None,
+        help="Override fuer das Crypto-Cohort (Default = trader.sweep.CRYPTO_COHORT).",
+    )
+    parser.add_argument(
+        "--in-sample-fraction",
+        type=float,
+        default=0.7,
+        help="Anteil der Bars fuer in-sample (rest = out-of-sample).",
+    )
+    parser.add_argument(
+        "--min-trades",
+        type=int,
+        default=30,
+        help="Mindestzahl OOS-Trades pro Symbol fuer eine eligible Zelle.",
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Smoke-Modus: kleines Grid + kleinere Cohorts (zur Validierung).",
     )
 
 

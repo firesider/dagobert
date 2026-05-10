@@ -44,10 +44,14 @@ trader signals --symbols AAPL --strategy ema_rsi_pullback
 trader backtest --symbols AAPL SPY --strategy breakout --bars 3000
 trader dump-frames --symbols AAPL SPY BTC/USD --timeframe 1d --bars 500 --out-dir data/research
 jupyter notebook notebooks/exploration.ipynb    # explore the dumped frames
+trader sweep --quick                             # smoke threshold sweep (8 cells × 2 equity + 1 crypto symbols × 1 timeframe)
+trader sweep                                     # full sweep — slow; calls Alpaca for the cohort
 python scripts/render_data_flow_charts.py    # regenerate DATA_FLOW.md charts in docs/img/ (needs `docs` group)
 ```
 
 `trader dump-frames` writes five parquet files into `--out-dir` (`ohlcv.parquet`, `indicators.parquet`, `signals.parquet`, `trades.parquet`, `equity.parquet`) — every stage of the research pipeline as a separate frame so you can iterate from a notebook without re-fetching. `src/trader/research.py` exposes `load_frames`, `summarize_trades`, and `plot_equity_curve` for the reload side; `notebooks/exploration.ipynb` is the canonical walkthrough.
+
+`trader sweep` runs a grid search over `pullback_tolerance × long_rsi_floor × atr_pct_floor × atr_pct_ceiling` (~140 cells after rejecting floor≥ceiling) for `(equity, crypto) × (1d, 1h)` cohorts. It splits each symbol's history 70/30 in-sample / out-of-sample, scores cells by mean OOS Sharpe across the cohort with a `min_trades >= 30` guard, and writes `<timestamp>.parquet` (full grid) plus `<timestamp>_winners.json` (per-cohort winners) into `data/sweep_results/`. The eventual goal is to use the equity/1d winner as the new `StrategyConfig` defaults; until that real run lands, the FX-tuned defaults remain.
 
 CI (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`, and `pytest` on Python 3.11/3.12 for every push/PR.
 

@@ -31,6 +31,8 @@ class StrategyConfig:
     short_rsi_ceiling: float = 48.0
     pullback_tolerance: float = 0.0025
     breakout_lookback: int = 20
+    atr_pct_floor: float = 0.003
+    atr_pct_ceiling: float = 0.03
 
 
 def build_signal_frame(
@@ -58,8 +60,15 @@ def build_signal_frame(
         + ((frame["momentum_rsi"].fillna(50).sub(50).abs().clip(upper=25) / 25.0) * 0.4)
     ).clip(upper=1.0)
 
-    suggested_stop = frame["atr_pct"].fillna(0.005).clip(lower=0.003, upper=0.03)
-    suggested_take_profit = (suggested_stop * 2.0).clip(lower=0.006, upper=0.08)
+    suggested_stop = (
+        frame["atr_pct"]
+        .fillna(0.005)
+        .clip(lower=strategy_config.atr_pct_floor, upper=strategy_config.atr_pct_ceiling)
+    )
+    suggested_take_profit = (suggested_stop * 2.0).clip(
+        lower=strategy_config.atr_pct_floor * 2.0,
+        upper=strategy_config.atr_pct_ceiling * 2.0 + 0.02,
+    )
 
     signal_frame = frame.copy()
     signal_frame["strategy_name"] = strategy
