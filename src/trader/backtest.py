@@ -92,7 +92,15 @@ def _run_single_symbol_backtest(
     drawdown = (equity / equity.cummax()) - 1.0
 
     curve = frame[
-        ["time", "signal", "signal_label", "close", "conviction_score", "strategy_name", "timeframe"]
+        [
+            "time",
+            "signal",
+            "signal_label",
+            "close",
+            "conviction_score",
+            "strategy_name",
+            "timeframe",
+        ]
     ].copy()
     curve["position"] = position
     curve["asset_return"] = asset_return
@@ -222,7 +230,9 @@ def _compute_portfolio_metrics(
     sharpe = (returns.mean() / vol * sqrt(periods_per_year)) if vol > 0 else 0.0
 
     gross_profit = trades.loc[trades["net_return"] > 0, "net_return"].sum() if len(trades) else 0.0
-    gross_loss = abs(trades.loc[trades["net_return"] < 0, "net_return"].sum()) if len(trades) else 0.0
+    gross_loss = (
+        abs(trades.loc[trades["net_return"] < 0, "net_return"].sum()) if len(trades) else 0.0
+    )
 
     return {
         "initial_capital": float(curve["equity"].iloc[0]) if not curve.empty else 0.0,

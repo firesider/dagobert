@@ -6,7 +6,7 @@ import importlib
 import importlib.util
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from typing import Any
 
@@ -31,7 +31,7 @@ class AlpacaConnectionSettings:
     data_feed: str = "iex"
 
     @classmethod
-    def from_env(cls) -> "AlpacaConnectionSettings":
+    def from_env(cls) -> AlpacaConnectionSettings:
         return cls(
             api_key=os.getenv("ALPACA_API_KEY_ID"),
             api_secret=os.getenv("ALPACA_API_SECRET_KEY"),
@@ -52,7 +52,7 @@ class AlpacaClient:
         self._crypto_client = crypto_client
 
     @classmethod
-    def from_env(cls) -> "AlpacaClient":
+    def from_env(cls) -> AlpacaClient:
         return cls(settings=AlpacaConnectionSettings.from_env())
 
     @staticmethod
@@ -76,9 +76,7 @@ class AlpacaClient:
         request = self._build_request(symbol, timeframe, bars, is_crypto)
         try:
             bar_set = (
-                client.get_crypto_bars(request)
-                if is_crypto
-                else client.get_stock_bars(request)
+                client.get_crypto_bars(request) if is_crypto else client.get_stock_bars(request)
             )
         except Exception as exc:
             raise AlpacaError(f"Alpaca-Datenabfrage fuer {symbol} fehlgeschlagen: {exc}") from exc
@@ -134,12 +132,7 @@ class AlpacaClient:
             "timeframe",
             "data_source",
         ]
-        return (
-            frame[expected_columns]
-            .sort_values("time")
-            .tail(bars)
-            .reset_index(drop=True)
-        )
+        return frame[expected_columns].sort_values("time").tail(bars).reset_index(drop=True)
 
     def _get_stock_client(self) -> Any:
         if self._stock_client is not None:
@@ -184,7 +177,9 @@ class AlpacaClient:
             )
 
         feed_module = self._import_module("alpaca.data.enums")
-        feed = getattr(feed_module.DataFeed, self.settings.data_feed.upper(), feed_module.DataFeed.IEX)
+        feed = getattr(
+            feed_module.DataFeed, self.settings.data_feed.upper(), feed_module.DataFeed.IEX
+        )
         return requests_module.StockBarsRequest(
             symbol_or_symbols=symbol,
             timeframe=tf,
@@ -194,9 +189,7 @@ class AlpacaClient:
 
     def _require_credentials(self) -> None:
         if not self.settings.api_key or not self.settings.api_secret:
-            raise AlpacaError(
-                "ALPACA_API_KEY_ID und ALPACA_API_SECRET_KEY muessen gesetzt sein."
-            )
+            raise AlpacaError("ALPACA_API_KEY_ID und ALPACA_API_SECRET_KEY muessen gesetzt sein.")
 
     @staticmethod
     def _import_module(name: str) -> Any:
@@ -218,7 +211,7 @@ def _estimate_start(timeframe: str, bars: int, is_crypto: bool) -> datetime:
     raw_days = ceil((bars * minutes) / (24 * 60) * buffer)
     minimum_days = 7 if minutes < 1440 else 365
     days = max(raw_days, minimum_days)
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:

@@ -8,9 +8,48 @@ from trader.strategies import StrategyConfig, build_signal_frame, latest_signals
 
 def _feature_frame() -> pd.DataFrame:
     time_index = pd.date_range("2024-01-01", periods=12, freq="h", tz="UTC")
-    close = [100.00, 100.10, 100.20, 100.15, 100.30, 100.25, 99.90, 99.80, 99.70, 99.65, 99.55, 99.50]
-    ema_20 = [100.00, 100.08, 100.18, 100.12, 100.28, 100.22, 99.92, 99.82, 99.72, 99.66, 99.57, 99.51]
-    ema_50 = [99.80, 99.90, 100.00, 100.02, 100.05, 100.10, 100.05, 99.98, 99.90, 99.85, 99.80, 99.75]
+    close = [
+        100.00,
+        100.10,
+        100.20,
+        100.15,
+        100.30,
+        100.25,
+        99.90,
+        99.80,
+        99.70,
+        99.65,
+        99.55,
+        99.50,
+    ]
+    ema_20 = [
+        100.00,
+        100.08,
+        100.18,
+        100.12,
+        100.28,
+        100.22,
+        99.92,
+        99.82,
+        99.72,
+        99.66,
+        99.57,
+        99.51,
+    ]
+    ema_50 = [
+        99.80,
+        99.90,
+        100.00,
+        100.02,
+        100.05,
+        100.10,
+        100.05,
+        99.98,
+        99.90,
+        99.85,
+        99.80,
+        99.75,
+    ]
     rsi = [55, 57, 60, 58, 61, 59, 44, 42, 40, 38, 37, 35]
 
     frame = pd.DataFrame(
@@ -56,7 +95,9 @@ def test_run_backtest_returns_portfolio_curve_and_trade_log() -> None:
     result = run_backtest(
         _feature_frame(),
         strategy_config=StrategyConfig(strategy="ema_rsi_pullback"),
-        backtest_config=BacktestConfig(initial_capital=10_000, risk_per_trade=0.01, stop_loss_pct=0.005),
+        backtest_config=BacktestConfig(
+            initial_capital=10_000, risk_per_trade=0.01, stop_loss_pct=0.005
+        ),
     )
 
     assert "PORTFOLIO" in set(result.equity_curve["symbol"])

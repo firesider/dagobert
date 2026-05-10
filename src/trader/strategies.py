@@ -108,13 +108,21 @@ def validate_strategy_name(strategy: str) -> str:
 
 
 def _ema_rsi_pullback_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.Series:
-    bullish_trend = (frame["ema_20"] > frame["ema_50"]) & (frame["trend_adx"] >= config.adx_threshold)
-    bearish_trend = (frame["ema_20"] < frame["ema_50"]) & (frame["trend_adx"] >= config.adx_threshold)
+    bullish_trend = (frame["ema_20"] > frame["ema_50"]) & (
+        frame["trend_adx"] >= config.adx_threshold
+    )
+    bearish_trend = (frame["ema_20"] < frame["ema_50"]) & (
+        frame["trend_adx"] >= config.adx_threshold
+    )
 
     near_ema = ((frame["close"] / frame["ema_20"]) - 1).abs() <= config.pullback_tolerance
 
-    long_signal = bullish_trend & near_ema & frame["momentum_rsi"].between(config.long_rsi_floor, 70)
-    short_signal = bearish_trend & near_ema & frame["momentum_rsi"].between(30, config.short_rsi_ceiling)
+    long_signal = (
+        bullish_trend & near_ema & frame["momentum_rsi"].between(config.long_rsi_floor, 70)
+    )
+    short_signal = (
+        bearish_trend & near_ema & frame["momentum_rsi"].between(30, config.short_rsi_ceiling)
+    )
 
     return pd.Series(
         np.select([long_signal, short_signal], [1, -1], default=0),
@@ -125,12 +133,16 @@ def _ema_rsi_pullback_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.
 
 def _breakout_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.Series:
     if {"high", "low"}.issubset(frame.columns):
-        lookback_high = frame.groupby("symbol")["high"].transform(
-            lambda series: series.rolling(config.breakout_lookback).max()
-        ).shift(1)
-        lookback_low = frame.groupby("symbol")["low"].transform(
-            lambda series: series.rolling(config.breakout_lookback).min()
-        ).shift(1)
+        lookback_high = (
+            frame.groupby("symbol")["high"]
+            .transform(lambda series: series.rolling(config.breakout_lookback).max())
+            .shift(1)
+        )
+        lookback_low = (
+            frame.groupby("symbol")["low"]
+            .transform(lambda series: series.rolling(config.breakout_lookback).min())
+            .shift(1)
+        )
     else:
         lookback_high = frame.groupby("symbol")["rolling_high_20"].shift(1)
         lookback_low = frame.groupby("symbol")["rolling_low_20"].shift(1)

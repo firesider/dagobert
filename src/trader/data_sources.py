@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import yfinance as yf
 
 from trader.alpaca import AlpacaClient, AlpacaError
 from trader.config import (
-    MT5_TIMEFRAME_ATTR_MAP,
     RESAMPLE_RULE_MAP,
     YFINANCE_INTERVAL_MAP,
     estimate_yfinance_start,
@@ -40,7 +39,7 @@ class YFinanceDataSource:
         symbol = normalize_symbol(request.symbol)
         timeframe = validate_timeframe(request.timeframe)
         start = estimate_yfinance_start(timeframe=timeframe, bars=request.bars)
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         interval = YFINANCE_INTERVAL_MAP[timeframe]
 
         frame = yf.download(

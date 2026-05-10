@@ -13,11 +13,18 @@ import pandas as pd
 from trader.alpaca import AlpacaError
 from trader.backtest import BacktestConfig, run_backtest
 from trader.config import DEFAULT_ALPACA_SYMBOLS, SUPPORTED_TIMEFRAMES
+
 # Forex-/MT5-Pfad ist aktuell deaktiviert. Modul bleibt importierbar fuer Tests.
 # from trader.mt5 import MetaTrader5Client, Mt5Error
 from trader.pipeline import build_dataset, save_frame, save_latest_snapshot
+
 # from trader.risk import PositionSizingInput, position_size_from_stop  # nur fuer mt5-check-order benoetigt
-from trader.strategies import SUPPORTED_STRATEGIES, StrategyConfig, build_signal_frame, latest_signals
+from trader.strategies import (
+    SUPPORTED_STRATEGIES,
+    StrategyConfig,
+    build_signal_frame,
+    latest_signals,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -376,7 +383,9 @@ def _add_backtest_parser(subparsers) -> None:
     _add_strategy_arguments(parser)
     parser.add_argument("--initial-capital", type=float, default=10_000.0, help="Startkapital")
     parser.add_argument("--risk-per-trade", type=float, default=0.01, help="Risikoanteil pro Trade")
-    parser.add_argument("--stop-loss-pct", type=float, default=0.005, help="Annahme fuer Stop-Distanz")
+    parser.add_argument(
+        "--stop-loss-pct", type=float, default=0.005, help="Annahme fuer Stop-Distanz"
+    )
     parser.add_argument("--max-leverage", type=float, default=1.0, help="Maximale Ziel-Exponierung")
     parser.add_argument("--fee-bps", type=float, default=1.0, help="Gebuehren in Basispunkten")
     parser.add_argument("--slippage-bps", type=float, default=1.0, help="Slippage in Basispunkten")
@@ -491,8 +500,12 @@ def _add_strategy_arguments(parser: argparse.ArgumentParser) -> None:
         choices=SUPPORTED_STRATEGIES,
         help="Signal-Regelwerk",
     )
-    parser.add_argument("--adx-threshold", type=float, default=18.0, help="Mindest-ADX fuer Trendstaerke")
-    parser.add_argument("--long-rsi-floor", type=float, default=52.0, help="RSI-Untergrenze fuer Longs")
+    parser.add_argument(
+        "--adx-threshold", type=float, default=18.0, help="Mindest-ADX fuer Trendstaerke"
+    )
+    parser.add_argument(
+        "--long-rsi-floor", type=float, default=52.0, help="RSI-Untergrenze fuer Longs"
+    )
     parser.add_argument(
         "--short-rsi-ceiling",
         type=float,
@@ -519,7 +532,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _json_default(value: Any) -> Any:
-    if isinstance(value, (pd.Timestamp,)):
+    if isinstance(value, pd.Timestamp):
         return value.isoformat()
     if hasattr(value, "item"):
         return value.item()

@@ -16,6 +16,8 @@ yfinance = "^0.2.66"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
+ruff = "^0.6"
+mypy = "^1.11"
 
 [tool.poetry.group.mt5.dependencies]
 MetaTrader5 = { version = "^5.0.5735", markers = "sys_platform == 'win32'" }
@@ -31,6 +33,36 @@ trader = "trader.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "Learning_Materials",
+    "src/trader/mt5.py",       # parked module, scheduled for removal in Phase 2
+    "tests/test_mt5.py",       # parked tests, scheduled for removal in Phase 2
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",      # line length handled by formatter
+    "RUF001",    # ambiguous unicode in strings — project text is German/uses × etc.
+    "RUF003",    # same, but in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # asserts in tests are fine
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = "trader.mt5"             # parked module, scheduled for removal in Phase 2
+ignore_errors = true
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

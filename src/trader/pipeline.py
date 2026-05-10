@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -24,7 +24,9 @@ def build_dataset(
 
     for symbol in requested_symbols:
         try:
-            raw = fetch_ohlcv(FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars), source=source)
+            raw = fetch_ohlcv(
+                FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars), source=source
+            )
             features = build_indicator_frame(raw)
             frames.append(features)
         except Exception as exc:  # pragma: no cover - keeps CLI robust across mixed data sources

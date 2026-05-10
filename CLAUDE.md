@@ -16,17 +16,18 @@ The repo's README, code comments, and CLI help text are written in German. Match
 
 ## Setup
 
-The project uses Poetry inside a conda env (no separate venv — `poetry.toml` sets `virtualenvs.create = false`).
+The project uses Poetry inside a conda env (no separate venv — `poetry.toml` sets `virtualenvs.create = false`). Python is pinned to `>=3.11,<3.13` in `pyproject.toml`.
 
 ```bash
 conda env create -f environment.yml
 conda activate trader
 python -m pip install poetry==2.3.2
-poetry install --with dev               # macOS / Linux
-poetry install --with dev,mt5           # Windows only — MT5 wheel is win32-only
+poetry install --with dev,alpaca         # active workflow (Alpaca data)
+poetry install --with dev,alpaca,mt5     # Windows only — adds parked MT5 path
+poetry install --with dev,alpaca,docs    # adds matplotlib for scripts/render_data_flow_charts.py
 ```
 
-The `mt5` group is gated by `markers = "sys_platform == 'win32'"`, so on macOS/Linux the `MetaTrader5` import will fail. That's expected: `data_sources.fetch_ohlcv(..., source="auto")` automatically falls back to `yfinance`.
+Four optional groups are defined in `pyproject.toml`: `dev`, `alpaca`, `mt5`, `docs`. The active Alpaca workflow needs `alpaca` — installing only `--with dev` will leave `alpaca-py` missing. The `mt5` group is gated by `markers = "sys_platform == 'win32'"`, so on macOS/Linux the `MetaTrader5` import will fail. That's expected: `data_sources.fetch_ohlcv(..., source="auto")` automatically falls back to `yfinance`.
 
 ## Common commands
 
@@ -34,12 +35,19 @@ The `mt5` group is gated by `markers = "sys_platform == 'win32'"`, so on macOS/L
 pytest -q                               # full test suite (pythonpath=src is configured)
 pytest tests/test_pipeline.py -q        # one file
 pytest tests/test_pipeline.py::test_build_indicator_frame_adds_expected_columns -q
+ruff check .                            # lint (config in pyproject.toml [tool.ruff])
+ruff format .                           # autoformat
+mypy                                    # type-check src/ (config in pyproject.toml [tool.mypy])
+pre-commit install                      # one-time: enable ruff hooks on commit
 trader                                  # equivalent to `trader dataset`
 trader dataset --symbols AAPL SPY --timeframe 1h --bars 1500
 trader signals --symbols AAPL --strategy ema_rsi_pullback
 trader backtest --symbols AAPL SPY --strategy breakout --bars 3000
+python scripts/render_data_flow_charts.py    # regenerate DATA_FLOW.md charts in docs/img/ (needs `docs` group)
 # mt5-* commands are commented out in cli.py — the FX broker workflow is parked.
 ```
+
+CI (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`, and `pytest` on Python 3.11/3.12 for every push/PR. `mt5.py` is excluded from both ruff and mypy because the module is scheduled for removal in the MT5-cleanup phase; remove the exclusions when you delete the file.
 
 CLI quirks worth knowing (see `cli.py:37`):
 - Calling `trader` with no args defaults to `dataset`.
@@ -84,6 +92,8 @@ Read from environment by `AlpacaConnectionSettings.from_env()` in `src/trader/al
 
 Alpaca is data-only in this repo: there is no Alpaca counterpart to the four `mt5-*` CLI commands. `order_check` / `order_calc_margin` / `order_calc_profit` have no Alpaca equivalent, so the broker workflow stays on MT5. Symbol routing in `AlpacaClient.copy_rates`: a `/` in the symbol (`BTC/USD`) routes to `CryptoHistoricalDataClient`; otherwise `StockHistoricalDataClient`. The default `--symbols` list is still FX, so `--source alpaca` requires the user to pass `--symbols AAPL SPY` (or similar) explicitly.
 
+`.env.example` is the authoritative list of environment variables — it covers both the Alpaca block above and the parked MT5 vars (broker login, server, terminal path) needed if/when the FX path is reactivated.
+
 ## Tests
 
-`pytest.ini_options.pythonpath = ["src"]` is set in `pyproject.toml`, so tests can `from trader.x import y` without installing the package. Tests under `tests/` are pure-pandas and don't require MT5; `test_mt5.py` injects a fake module rather than importing the real one. Keep MT5-dependent tests fakeable the same way.
+`pytest.ini_options.pythonpath = ["src"]` is set in `pyproject.toml`, so tests can `from trader.x import y` without installing the package. Tests under `tests/` are pure-pandas and don't require MT5; `test_mt5.py` injects a fake module into `sys.modules` before importing `trader.mt5`. Reuse this pattern for any new test that touches optionally-installed deps so the suite stays runnable on macOS/Linux without the `mt5` group.

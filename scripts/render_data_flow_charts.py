@@ -75,8 +75,12 @@ def render_signals_breakout(out_path: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(10, 5.5), dpi=200)
     ax.plot(signals["time"], signals["close"], label="close", color="#1f1f1f", linewidth=1.2)
-    ax.scatter(longs["time"], longs["close"], marker="^", color="#15803d", s=42, label="long", zorder=3)
-    ax.scatter(shorts["time"], shorts["close"], marker="v", color="#b91c1c", s=42, label="short", zorder=3)
+    ax.scatter(
+        longs["time"], longs["close"], marker="^", color="#15803d", s=42, label="long", zorder=3
+    )
+    ax.scatter(
+        shorts["time"], shorts["close"], marker="v", color="#b91c1c", s=42, label="short", zorder=3
+    )
     ax.set_title(f"AAPL daily close with breakout-strategy signals  ({PRICE_BARS} bars)")
     ax.set_xlabel("date (UTC)")
     ax.set_ylabel("price (USD)")
@@ -122,7 +126,9 @@ def render_portfolio_equity(out_path: Path) -> None:
     )
     ax.set_xlabel("date (UTC)")
     ax.set_ylabel("equity (USD)")
-    ax.axhline(BacktestConfig().initial_capital, color="#9ca3af", linestyle="--", linewidth=0.8, alpha=0.7)
+    ax.axhline(
+        BacktestConfig().initial_capital, color="#9ca3af", linestyle="--", linewidth=0.8, alpha=0.7
+    )
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.25)
     fig.autofmt_xdate()

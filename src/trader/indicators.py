@@ -53,7 +53,16 @@ def build_indicator_frame(raw_frame: pd.DataFrame) -> pd.DataFrame:
     frame["time"] = pd.to_datetime(frame["time"], utc=True)
     frame = frame.sort_values("time").drop_duplicates(subset=["time"]).reset_index(drop=True)
 
-    numeric_columns = ["open", "high", "low", "close", "volume", "tick_volume", "spread", "real_volume"]
+    numeric_columns = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "tick_volume",
+        "spread",
+        "real_volume",
+    ]
     for column in numeric_columns:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -136,7 +145,8 @@ def _add_price_action_features(frame: pd.DataFrame) -> pd.DataFrame:
             "sma_50": frame["close"].rolling(50).mean(),
             "sma_200": frame["close"].rolling(200).mean(),
             "atr_pct": frame["volatility_atr"] / close_safe,
-            "close_zscore_20": (frame["close"] - rolling_mean_20) / rolling_std_20.replace(0, np.nan),
+            "close_zscore_20": (frame["close"] - rolling_mean_20)
+            / rolling_std_20.replace(0, np.nan),
             "rolling_high_20": rolling_high_20,
             "rolling_low_20": rolling_low_20,
         },

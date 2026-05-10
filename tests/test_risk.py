@@ -27,4 +27,6 @@ def test_position_size_from_stop_uses_contract_and_step_constraints() -> None:
 
 
 def test_implied_notional_exposure_caps_at_max_leverage() -> None:
-    assert implied_notional_exposure(risk_fraction=0.01, stop_loss_pct=0.005, max_leverage=1.5) == 1.5
+    assert (
+        implied_notional_exposure(risk_fraction=0.01, stop_loss_pct=0.005, max_leverage=1.5) == 1.5
+    )

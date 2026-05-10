@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import ceil
 
 # Forex-Defaults sind aktuell deaktiviert (Repo-Fokus auf Alpaca/US-Aktien).
@@ -118,4 +118,4 @@ def estimate_yfinance_start(timeframe: str, bars: int) -> datetime:
         "1d": 365,
     }[tf]
     days = min(max(raw_days, minimum_days), YFINANCE_LOOKBACK_CAP_DAYS[tf])
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
