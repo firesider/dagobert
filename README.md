@@ -23,6 +23,9 @@ Bewusst pragmatisch: lokal benutzbar, offline testbar, mit sauberer CLI und ausf
 ├── pyproject.toml
 ├── README.md
 ├── DATA_FLOW.md
+├── docs/
+│   ├── PROJECT_STRUCTURE.md
+│   └── img/
 ├── data/
 ├── src/trader/
 │   ├── __init__.py
@@ -157,7 +160,7 @@ print(latest_signals(signals))
 
 ## Strategien
 
-Beide Strategien sind bewusst einfache, nachvollziehbare Baselines — kein Versprechen auf Alpha.
+Alle Strategien sind bewusst einfache, nachvollziehbare Baselines — kein Versprechen auf Alpha.
 
 ### `ema_rsi_pullback`
 
@@ -170,6 +173,19 @@ Beide Strategien sind bewusst einfache, nachvollziehbare Baselines — kein Vers
 
 - 20-Bar Hoch/Tief als Trigger (`rolling_high_20` / `rolling_low_20`)
 - ADX-Filter wie oben
+
+### `mean_reversion`
+
+- Ranging-Filter: ADX unter `--adx-threshold`
+- Long: `close_zscore_20` unter `--mean-reversion-zscore` und RSI unter `--short-rsi-ceiling`
+- Short: `close_zscore_20` ueber `--mean-reversion-zscore` und RSI ueber `--long-rsi-floor`
+
+### `momentum_trend`
+
+- Trendfilter: `ema_20` vs. `ema_50`
+- Staerke: ADX ueber `--adx-threshold`
+- Momentum: ROC ueber `--momentum-roc-floor` fuer Longs bzw. darunter fuer Shorts
+- `--momentum-lookback` steuert das ROC-Fenster
 
 > **Heads-up:** Die Defaults (`pullback_tolerance=0.0025`, `long_rsi_floor=52`, ATR-Clip `[0.003, 0.03]`) wurden urspruenglich auf FX kalibriert. Auf US-Aktien und Crypto feuern sie seltener oder bei anderen Skalen. Eine datengetriebene Kalibrierung auf Alpaca-Historie ist geplant; bis dahin ueber CLI-Flags ueberschreiben.
 
@@ -203,4 +219,5 @@ Alle Bar-Zeiten sind UTC. `_normalize_frame` (`alpaca.py`) konvertiert vor dem F
 ## Weiterlesen
 
 - [DATA_FLOW.md](./DATA_FLOW.md) — vollstaendige Daten-Pipeline mit Schemas, Diagrammen und Beispielcharts
+- [docs/PROJECT_STRUCTURE.md](./docs/PROJECT_STRUCTURE.md) — Datei- und Ordnerstruktur des Projekts
 - [CLAUDE.md](./CLAUDE.md) — Hinweise fuer Claude Code Sessions, die in diesem Repo arbeiten

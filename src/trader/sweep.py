@@ -10,10 +10,12 @@ Pipeline per ``(symbol, timeframe, parameter cell)``:
 2. Build the indicator frame.
 3. Split bars 70/30 by time — first 70% is "in-sample" (used to filter
    degenerate cells), last 30% is "out-of-sample" (the reported metric).
-4. Run :func:`run_backtest` with the parameter cell on the OOS slice.
-5. Compute net Sharpe; reject the cell if ``trade_count < min_trades``.
+4. Run :func:`run_backtest` with the parameter cell on both splits.
+5. Persist strategy/backtest parameters plus IS/OOS metrics for ranking.
 
-Winners are picked per ``(cohort, timeframe)`` by max OOS Sharpe.
+Winners are picked per ``(cohort, timeframe)`` by a robust score that
+rewards OOS Sharpe, benchmark outperformance, and trade count while
+penalizing drawdown and cross-symbol instability.
 
 The CLI subcommand ``trader sweep`` exposes the full pipeline plus a
 ``--quick`` smoke option that uses a tiny grid for end-to-end validation.
@@ -165,17 +167,19 @@ def pick_winners(
     results: pd.DataFrame,
     min_trades: int = 30,
 ) -> pd.DataFrame:
-    """Pick the highest OOS Sharpe per (cohort, timeframe), aggregating symbols.
+    """Pick the most robust cell per (cohort, timeframe), aggregating symbols.
 
     A cell is eligible only if the per-symbol average ``oos_trade_count``
-    in the cohort meets ``min_trades``. The aggregate score is the mean
-    OOS Sharpe across the cohort's symbols.
+    in the cohort meets ``min_trades``. The score prefers high OOS Sharpe
+    and benchmark outperformance, then penalizes drawdown and symbol-level
+    Sharpe dispersion.
     """
     if results.empty:
         return results.copy()
 
+    ranking_frame = _with_ranking_defaults(results)
     grouped = (
-        results.groupby(
+        ranking_frame.groupby(
             [
                 "cohort",
                 "timeframe",
@@ -186,8 +190,16 @@ def pick_winners(
             ]
         )
         .agg(
+            strategy=("strategy", "first"),
             oos_sharpe_mean=("oos_sharpe", "mean"),
+            oos_sharpe_std=("oos_sharpe", "std"),
+            oos_total_return_mean=("oos_total_return", "mean"),
+            oos_max_drawdown_mean=("oos_max_drawdown", "mean"),
+            oos_profit_factor_mean=("oos_profit_factor", "mean"),
+            oos_benchmark_total_return_mean=("oos_benchmark_total_return", "mean"),
             oos_trade_count_mean=("oos_trade_count", "mean"),
+            oos_trade_count_min=("oos_trade_count", "min"),
+            in_sample_sharpe_mean=("in_sample_sharpe", "mean"),
             symbol_count=("symbol", "nunique"),
         )
         .reset_index()
@@ -196,8 +208,23 @@ def pick_winners(
     if eligible.empty:
         return eligible
 
+    eligible["oos_sharpe_std"] = eligible["oos_sharpe_std"].fillna(0.0)
+    eligible["oos_excess_return_mean"] = (
+        eligible["oos_total_return_mean"] - eligible["oos_benchmark_total_return_mean"]
+    )
+    eligible["robust_score"] = (
+        eligible["oos_sharpe_mean"].fillna(0.0)
+        + (eligible["oos_excess_return_mean"].fillna(0.0) * 0.5)
+        + (eligible["oos_trade_count_mean"].clip(upper=min_trades * 3) / min_trades * 0.05)
+        - eligible["oos_sharpe_std"].fillna(0.0)
+        - eligible["oos_max_drawdown_mean"].abs().fillna(0.0)
+    )
+
     winners = (
-        eligible.sort_values("oos_sharpe_mean", ascending=False)
+        eligible.sort_values(
+            ["robust_score", "oos_sharpe_mean", "oos_trade_count_mean"],
+            ascending=[False, False, False],
+        )
         .groupby(["cohort", "timeframe"], sort=True)
         .head(1)
         .reset_index(drop=True)
@@ -210,6 +237,7 @@ def persist_results(
     winners: pd.DataFrame,
     out_dir: str | Path,
     timestamp: str | None = None,
+    config: SweepConfig | None = None,
 ) -> tuple[Path, Path]:
     """Write the full grid + winners to ``out_dir``. Returns (results_path, winners_path)."""
     target = Path(out_dir)
@@ -222,6 +250,11 @@ def persist_results(
     results.to_parquet(results_path, index=False)
     winners_payload = {
         "generated_at": stamp,
+        "ranking_method": (
+            "robust_score = oos_sharpe_mean + 0.5*oos_excess_return_mean "
+            "+ capped_trade_count_bonus - oos_sharpe_std - abs(oos_max_drawdown_mean)"
+        ),
+        "config": _config_to_payload(config) if config is not None else None,
         "winners": [_winner_to_payload(row) for _, row in winners.iterrows()],
     }
     winners_path.write_text(json.dumps(winners_payload, indent=2), encoding="utf-8")
@@ -246,21 +279,42 @@ def _evaluate_cell(
         atr_pct_ceiling=cell["atr_pct_ceiling"],
     )
 
-    in_sharpe, in_trades = _backtest_score(in_sample, strategy_config, sweep_config)
-    oos_sharpe, oos_trades = _backtest_score(out_of_sample, strategy_config, sweep_config)
+    in_metrics = _backtest_metrics(in_sample, strategy_config, sweep_config)
+    oos_metrics = _backtest_metrics(out_of_sample, strategy_config, sweep_config)
 
     return {
         "cohort": cohort,
         "symbol": symbol,
         "timeframe": timeframe,
+        "strategy": sweep_config.strategy,
+        "in_sample_fraction": sweep_config.in_sample_fraction,
+        "min_trades": sweep_config.min_trades,
+        "risk_per_trade": sweep_config.backtest_config.risk_per_trade,
+        "stop_loss_pct": sweep_config.backtest_config.stop_loss_pct,
+        "max_leverage": sweep_config.backtest_config.max_leverage,
+        "fee_bps": sweep_config.backtest_config.fee_bps,
+        "slippage_bps": sweep_config.backtest_config.slippage_bps,
+        "allow_short": int(sweep_config.backtest_config.allow_short),
+        "use_strategy_exits": int(sweep_config.backtest_config.use_strategy_exits),
+        "in_sample_bars": len(in_sample),
+        "out_of_sample_bars": len(out_of_sample),
         "pullback_tolerance": cell["pullback_tolerance"],
         "long_rsi_floor": cell["long_rsi_floor"],
         "atr_pct_floor": cell["atr_pct_floor"],
         "atr_pct_ceiling": cell["atr_pct_ceiling"],
-        "in_sample_sharpe": in_sharpe,
-        "in_sample_trade_count": in_trades,
-        "oos_sharpe": oos_sharpe,
-        "oos_trade_count": oos_trades,
+        "in_sample_sharpe": in_metrics["sharpe"],
+        "in_sample_trade_count": int(in_metrics["trade_count"]),
+        "in_sample_total_return": in_metrics["total_return"],
+        "in_sample_max_drawdown": in_metrics["max_drawdown"],
+        "in_sample_profit_factor": in_metrics["profit_factor"],
+        "in_sample_benchmark_total_return": in_metrics["benchmark_total_return"],
+        "oos_sharpe": oos_metrics["sharpe"],
+        "oos_trade_count": int(oos_metrics["trade_count"]),
+        "oos_total_return": oos_metrics["total_return"],
+        "oos_max_drawdown": oos_metrics["max_drawdown"],
+        "oos_profit_factor": oos_metrics["profit_factor"],
+        "oos_benchmark_total_return": oos_metrics["benchmark_total_return"],
+        "oos_excess_return": oos_metrics["total_return"] - oos_metrics["benchmark_total_return"],
     }
 
 
@@ -269,8 +323,17 @@ def _backtest_score(
     strategy_config: StrategyConfig,
     sweep_config: SweepConfig,
 ) -> tuple[float, int]:
+    metrics = _backtest_metrics(indicators, strategy_config, sweep_config)
+    return float(metrics["sharpe"]), int(metrics["trade_count"])
+
+
+def _backtest_metrics(
+    indicators: pd.DataFrame,
+    strategy_config: StrategyConfig,
+    sweep_config: SweepConfig,
+) -> dict[str, float]:
     if indicators.empty:
-        return float("nan"), 0
+        return _empty_metrics()
     try:
         result = run_backtest(
             indicators,
@@ -278,13 +341,36 @@ def _backtest_score(
             backtest_config=sweep_config.backtest_config,
         )
     except (ValueError, KeyError):
-        return float("nan"), 0
+        return _empty_metrics()
 
-    sharpe = float(result.metrics.get("sharpe", float("nan")))
-    trade_count = int(result.metrics.get("trade_count", 0))
-    if not math.isfinite(sharpe):
-        sharpe = float("nan")
-    return sharpe, trade_count
+    return {
+        "sharpe": _finite_metric(result.metrics, "sharpe"),
+        "trade_count": _finite_metric(result.metrics, "trade_count", default=0.0),
+        "total_return": _finite_metric(result.metrics, "total_return"),
+        "max_drawdown": _finite_metric(result.metrics, "max_drawdown"),
+        "profit_factor": _finite_metric(result.metrics, "profit_factor"),
+        "benchmark_total_return": _finite_metric(result.metrics, "benchmark_total_return"),
+    }
+
+
+def _empty_metrics() -> dict[str, float]:
+    return {
+        "sharpe": float("nan"),
+        "trade_count": 0.0,
+        "total_return": float("nan"),
+        "max_drawdown": float("nan"),
+        "profit_factor": float("nan"),
+        "benchmark_total_return": float("nan"),
+    }
+
+
+def _finite_metric(
+    metrics: dict[str, float],
+    key: str,
+    default: float = float("nan"),
+) -> float:
+    value = float(metrics.get(key, default))
+    return value if math.isfinite(value) else default
 
 
 def _split_in_out(
@@ -323,11 +409,64 @@ def _winner_to_payload(row: pd.Series) -> dict[str, float | str | int]:
     return {
         "cohort": str(row["cohort"]),
         "timeframe": str(row["timeframe"]),
+        "strategy": str(row.get("strategy", "ema_rsi_pullback")),
         "pullback_tolerance": float(row["pullback_tolerance"]),
         "long_rsi_floor": float(row["long_rsi_floor"]),
         "atr_pct_floor": float(row["atr_pct_floor"]),
         "atr_pct_ceiling": float(row["atr_pct_ceiling"]),
+        "robust_score": float(row.get("robust_score", float("nan"))),
         "oos_sharpe_mean": float(row["oos_sharpe_mean"]),
+        "oos_sharpe_std": float(row.get("oos_sharpe_std", 0.0)),
+        "oos_total_return_mean": float(row.get("oos_total_return_mean", float("nan"))),
+        "oos_excess_return_mean": float(row.get("oos_excess_return_mean", float("nan"))),
+        "oos_max_drawdown_mean": float(row.get("oos_max_drawdown_mean", float("nan"))),
+        "oos_profit_factor_mean": float(row.get("oos_profit_factor_mean", float("nan"))),
         "oos_trade_count_mean": float(row["oos_trade_count_mean"]),
+        "oos_trade_count_min": float(row.get("oos_trade_count_min", float("nan"))),
+        "in_sample_sharpe_mean": float(row.get("in_sample_sharpe_mean", float("nan"))),
         "symbol_count": int(row["symbol_count"]),
+    }
+
+
+def _with_ranking_defaults(results: pd.DataFrame) -> pd.DataFrame:
+    frame = results.copy()
+    defaults: dict[str, str | float] = {
+        "strategy": "ema_rsi_pullback",
+        "oos_total_return": 0.0,
+        "oos_max_drawdown": 0.0,
+        "oos_profit_factor": 0.0,
+        "oos_benchmark_total_return": 0.0,
+        "in_sample_sharpe": 0.0,
+    }
+    for column, default in defaults.items():
+        if column not in frame.columns:
+            frame[column] = default
+    return frame
+
+
+def _config_to_payload(config: SweepConfig) -> dict[str, object]:
+    return {
+        "strategy": config.strategy,
+        "timeframes": list(config.timeframes),
+        "equity_symbols": list(config.equity_symbols),
+        "crypto_symbols": list(config.crypto_symbols),
+        "in_sample_fraction": config.in_sample_fraction,
+        "min_trades": config.min_trades,
+        "years_by_timeframe": config.years_by_timeframe,
+        "grid": {
+            "pullback_tolerance": list(config.grid.pullback_tolerance),
+            "long_rsi_floor": list(config.grid.long_rsi_floor),
+            "atr_pct_floor": list(config.grid.atr_pct_floor),
+            "atr_pct_ceiling": list(config.grid.atr_pct_ceiling),
+        },
+        "backtest": {
+            "initial_capital": config.backtest_config.initial_capital,
+            "risk_per_trade": config.backtest_config.risk_per_trade,
+            "stop_loss_pct": config.backtest_config.stop_loss_pct,
+            "max_leverage": config.backtest_config.max_leverage,
+            "fee_bps": config.backtest_config.fee_bps,
+            "slippage_bps": config.backtest_config.slippage_bps,
+            "allow_short": config.backtest_config.allow_short,
+            "use_strategy_exits": config.backtest_config.use_strategy_exits,
+        },
     }

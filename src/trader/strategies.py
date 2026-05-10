@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-SUPPORTED_STRATEGIES = ("ema_rsi_pullback", "breakout")
+SUPPORTED_STRATEGIES = ("ema_rsi_pullback", "breakout", "mean_reversion", "momentum_trend")
 
 REQUIRED_SIGNAL_COLUMNS = {
     "symbol",
@@ -31,6 +31,9 @@ class StrategyConfig:
     short_rsi_ceiling: float = 48.0
     pullback_tolerance: float = 0.0025
     breakout_lookback: int = 20
+    mean_reversion_zscore: float = 1.5
+    momentum_lookback: int = 20
+    momentum_roc_floor: float = 0.02
     atr_pct_floor: float = 0.003
     atr_pct_ceiling: float = 0.03
 
@@ -52,8 +55,12 @@ def build_signal_frame(
 
     if strategy == "ema_rsi_pullback":
         signal = _ema_rsi_pullback_signal(frame, strategy_config)
-    else:
+    elif strategy == "breakout":
         signal = _breakout_signal(frame, strategy_config)
+    elif strategy == "mean_reversion":
+        signal = _mean_reversion_signal(frame, strategy_config)
+    else:
+        signal = _momentum_trend_signal(frame, strategy_config)
 
     conviction = (
         ((frame["trend_adx"].fillna(0).clip(lower=0, upper=50) / 50.0) * 0.6)
@@ -165,3 +172,72 @@ def _breakout_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.Series:
         index=frame.index,
         dtype="int64",
     )
+
+
+def _mean_reversion_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.Series:
+    zscore = _close_zscore(frame)
+    ranging = frame["trend_adx"] <= config.adx_threshold
+
+    long_signal = (
+        ranging
+        & (zscore <= -config.mean_reversion_zscore)
+        & (frame["momentum_rsi"] <= config.short_rsi_ceiling)
+    )
+    short_signal = (
+        ranging
+        & (zscore >= config.mean_reversion_zscore)
+        & (frame["momentum_rsi"] >= config.long_rsi_floor)
+    )
+
+    return pd.Series(
+        np.select([long_signal, short_signal], [1, -1], default=0),
+        index=frame.index,
+        dtype="int64",
+    )
+
+
+def _momentum_trend_signal(frame: pd.DataFrame, config: StrategyConfig) -> pd.Series:
+    roc = _momentum_roc(frame, config.momentum_lookback)
+    bullish_trend = (frame["ema_20"] > frame["ema_50"]) & (
+        frame["trend_adx"] >= config.adx_threshold
+    )
+    bearish_trend = (frame["ema_20"] < frame["ema_50"]) & (
+        frame["trend_adx"] >= config.adx_threshold
+    )
+
+    long_signal = (
+        bullish_trend
+        & (roc >= config.momentum_roc_floor)
+        & (frame["momentum_rsi"] >= config.long_rsi_floor)
+    )
+    short_signal = (
+        bearish_trend
+        & (roc <= -config.momentum_roc_floor)
+        & (frame["momentum_rsi"] <= config.short_rsi_ceiling)
+    )
+
+    return pd.Series(
+        np.select([long_signal, short_signal], [1, -1], default=0),
+        index=frame.index,
+        dtype="int64",
+    )
+
+
+def _close_zscore(frame: pd.DataFrame) -> pd.Series:
+    if "close_zscore_20" in frame.columns:
+        return frame["close_zscore_20"]
+
+    rolling_mean = frame.groupby("symbol")["close"].transform(
+        lambda series: series.rolling(20).mean()
+    )
+    rolling_std = frame.groupby("symbol")["close"].transform(
+        lambda series: series.rolling(20).std()
+    )
+    return (frame["close"] - rolling_mean) / rolling_std.replace(0, np.nan)
+
+
+def _momentum_roc(frame: pd.DataFrame, lookback: int) -> pd.Series:
+    if "momentum_roc" in frame.columns:
+        return frame["momentum_roc"] / 100.0
+
+    return frame.groupby("symbol")["close"].transform(lambda series: series.pct_change(lookback))

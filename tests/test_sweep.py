@@ -103,8 +103,18 @@ def test_run_sweep_smoke(monkeypatch) -> None:
         "atr_pct_ceiling",
         "in_sample_sharpe",
         "in_sample_trade_count",
+        "in_sample_total_return",
+        "in_sample_max_drawdown",
+        "in_sample_benchmark_total_return",
         "oos_sharpe",
         "oos_trade_count",
+        "oos_total_return",
+        "oos_max_drawdown",
+        "oos_benchmark_total_return",
+        "oos_excess_return",
+        "strategy",
+        "risk_per_trade",
+        "stop_loss_pct",
     }
     assert expected_cols.issubset(set(results.columns))
     assert set(results["cohort"]) == {"equity", "crypto"}
@@ -158,6 +168,7 @@ def test_pick_winners_rejects_low_trade_count_and_picks_best() -> None:
     assert winner["long_rsi_floor"] == pytest.approx(55.0)
     # The 5-trade cell with Sharpe=5.0 must NOT be the winner.
     assert winner["oos_sharpe_mean"] == pytest.approx(1.2)
+    assert "robust_score" in winner
 
 
 def test_pick_winners_returns_empty_when_no_cell_eligible() -> None:
@@ -210,7 +221,52 @@ def test_persist_results_writes_parquet_and_winners_json(tmp_path: Path) -> None
 
     payload = json.loads(winners_path.read_text())
     assert payload["generated_at"] == "20260101T000000Z"
+    assert "robust_score" in payload["ranking_method"]
+    assert payload["config"] is None
     assert len(payload["winners"]) == 1
     winner = payload["winners"][0]
     assert winner["cohort"] == "equity"
     assert winner["pullback_tolerance"] == pytest.approx(0.005)
+    assert "robust_score" in winner
+
+
+def test_persist_results_includes_config_metadata(tmp_path: Path) -> None:
+    results = pd.DataFrame(
+        [
+            {
+                "cohort": "equity",
+                "symbol": "AAA",
+                "timeframe": "1d",
+                "strategy": "ema_rsi_pullback",
+                "pullback_tolerance": 0.005,
+                "long_rsi_floor": 52.0,
+                "atr_pct_floor": 0.003,
+                "atr_pct_ceiling": 0.03,
+                "in_sample_sharpe": 0.7,
+                "in_sample_trade_count": 60,
+                "oos_sharpe": 1.1,
+                "oos_total_return": 0.12,
+                "oos_max_drawdown": -0.04,
+                "oos_profit_factor": 1.8,
+                "oos_benchmark_total_return": 0.05,
+                "oos_trade_count": 40,
+            }
+        ]
+    )
+    config = SweepConfig(
+        grid=SweepGrid.quick(),
+        timeframes=("1d",),
+        equity_symbols=("AAA",),
+        crypto_symbols=(),
+        min_trades=1,
+    )
+    winners = pick_winners(results, min_trades=1)
+    _, winners_path = persist_results(
+        results, winners, tmp_path, timestamp="20260101T000000Z", config=config
+    )
+
+    payload = json.loads(winners_path.read_text())
+    assert payload["config"]["strategy"] == "ema_rsi_pullback"
+    assert payload["config"]["timeframes"] == ["1d"]
+    assert payload["config"]["equity_symbols"] == ["AAA"]
+    assert payload["config"]["grid"]["pullback_tolerance"] == [0.0025, 0.01]

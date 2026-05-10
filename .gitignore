@@ -25,6 +25,10 @@ env/
 .coverage
 htmlcov/
 
+# --- Generated research outputs ---
+data/*
+!data/.gitkeep
+
 # --- IDE / Editor ---
 .idea/
 .vscode/

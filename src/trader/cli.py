@@ -12,8 +12,10 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from trader.alpaca import AlpacaError
-from trader.backtest import BacktestConfig, run_backtest
+from trader.backtest import BacktestConfig, run_backtest, run_walk_forward_backtest
+from trader.backtest_report import render_backtest_report
 from trader.config import DEFAULT_ALPACA_SYMBOLS, SUPPORTED_TIMEFRAMES
+from trader.dashboard import DashboardConfig, serve_dashboard
 from trader.pipeline import build_dataset, save_frame, save_latest_snapshot
 from trader.research import dump_frames
 from trader.strategies import (
@@ -31,6 +33,7 @@ from trader.sweep import (
     pick_winners,
     run_sweep,
 )
+from trader.sweep_report import render_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,8 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dataset_parser(subparsers)
     _add_signals_parser(subparsers)
     _add_backtest_parser(subparsers)
+    _add_backtest_report_parser(subparsers)
+    _add_dashboard_parser(subparsers)
     _add_dump_frames_parser(subparsers)
     _add_sweep_parser(subparsers)
+    _add_sweep_report_parser(subparsers)
     return parser
 
 
@@ -66,10 +72,16 @@ def main(argv: list[str] | None = None) -> int:
             return _run_signals_command(args)
         if args.command == "backtest":
             return _run_backtest_command(args)
+        if args.command == "backtest-report":
+            return _run_backtest_report_command(args)
+        if args.command == "dashboard":
+            return _run_dashboard_command(args)
         if args.command == "dump-frames":
             return _run_dump_frames_command(args)
         if args.command == "sweep":
             return _run_sweep_command(args)
+        if args.command == "sweep-report":
+            return _run_sweep_report_command(args)
     except (RuntimeError, ValueError, AlpacaError) as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -123,19 +135,30 @@ def _run_backtest_command(args: argparse.Namespace) -> int:
         timeframe=args.timeframe,
         bars=args.bars,
     )
-    result = run_backtest(
-        dataset,
-        strategy_config=_strategy_config_from_args(args),
-        backtest_config=BacktestConfig(
-            initial_capital=args.initial_capital,
-            risk_per_trade=args.risk_per_trade,
-            stop_loss_pct=args.stop_loss_pct,
-            max_leverage=args.max_leverage,
-            fee_bps=args.fee_bps,
-            slippage_bps=args.slippage_bps,
-            allow_short=not args.long_only,
-        ),
+    strategy_config = _strategy_config_from_args(args)
+    backtest_config = BacktestConfig(
+        initial_capital=args.initial_capital,
+        risk_per_trade=args.risk_per_trade,
+        stop_loss_pct=args.stop_loss_pct,
+        max_leverage=args.max_leverage,
+        fee_bps=args.fee_bps,
+        slippage_bps=args.slippage_bps,
+        allow_short=not args.long_only,
+        use_strategy_exits=args.use_strategy_exits,
     )
+    if args.walk_forward:
+        result = run_walk_forward_backtest(
+            dataset,
+            strategy_config=strategy_config,
+            backtest_config=backtest_config,
+            in_sample_fraction=args.in_sample_fraction,
+        )
+    else:
+        result = run_backtest(
+            dataset,
+            strategy_config=strategy_config,
+            backtest_config=backtest_config,
+        )
 
     output_path = save_frame(result.equity_curve, Path(args.output))
     trades_path = save_frame(result.trades, output_path.with_name(f"{output_path.stem}_trades.csv"))
@@ -156,9 +179,16 @@ def _run_backtest_command(args: argparse.Namespace) -> int:
         "trade_count",
         "win_rate",
         "profit_factor",
+        "benchmark_total_return",
+        "benchmark_sharpe",
+        "out_of_sample_total_return",
+        "out_of_sample_sharpe",
+        "out_of_sample_benchmark_total_return",
+        "out_of_sample_benchmark_sharpe",
     ):
         value = result.metrics.get(key)
-        print(f"{key}: {value}")
+        if value is not None:
+            print(f"{key}: {value}")
     return 0
 
 
@@ -177,6 +207,28 @@ def _run_dump_frames_command(args: argparse.Namespace) -> int:
     print(f"  signals:    {len(frames.signals)} Zeilen")
     print(f"  trades:     {len(frames.trades)} Zeilen")
     print(f"  equity:     {len(frames.equity)} Zeilen")
+    return 0
+
+
+def _run_backtest_report_command(args: argparse.Namespace) -> int:
+    out_dir = render_backtest_report(
+        args.equity,
+        args.out_dir,
+        trades_path=args.trades,
+        metrics_path=args.metrics,
+    )
+    print(f"Backtest-Report gespeichert: {out_dir / 'REPORT.md'}")
+    return 0
+
+
+def _run_dashboard_command(args: argparse.Namespace) -> int:
+    serve_dashboard(
+        DashboardConfig(
+            data_dir=Path(args.data_dir),
+            host=args.host,
+            port=args.port,
+        )
+    )
     return 0
 
 
@@ -214,7 +266,7 @@ def _run_sweep_command(args: argparse.Namespace) -> int:
         )
 
     winners = pick_winners(results, min_trades=args.min_trades)
-    results_path, winners_path = persist_results(results, winners, args.out_dir)
+    results_path, winners_path = persist_results(results, winners, args.out_dir, config=config)
 
     print(f"Ergebnisse: {results_path}")
     print(f"Winners:    {winners_path}")
@@ -229,11 +281,20 @@ def _run_sweep_command(args: argparse.Namespace) -> int:
                     "long_rsi_floor",
                     "atr_pct_floor",
                     "atr_pct_ceiling",
+                    "robust_score",
                     "oos_sharpe_mean",
+                    "oos_excess_return_mean",
+                    "oos_max_drawdown_mean",
                     "oos_trade_count_mean",
                 ]
             ].to_string(index=False)
         )
+    return 0
+
+
+def _run_sweep_report_command(args: argparse.Namespace) -> int:
+    out_dir = render_report(args.input, args.out_dir, min_trades=args.min_trades)
+    print(f"Sweep-Report gespeichert: {out_dir / 'REPORT.md'}")
     return 0
 
 
@@ -245,6 +306,9 @@ def _strategy_config_from_args(args: argparse.Namespace) -> StrategyConfig:
         short_rsi_ceiling=args.short_rsi_ceiling,
         pullback_tolerance=args.pullback_tolerance,
         breakout_lookback=args.breakout_lookback,
+        mean_reversion_zscore=args.mean_reversion_zscore,
+        momentum_lookback=args.momentum_lookback,
+        momentum_roc_floor=args.momentum_roc_floor,
     )
 
 
@@ -292,10 +356,66 @@ def _add_backtest_parser(subparsers) -> None:
     parser.add_argument("--slippage-bps", type=float, default=1.0, help="Slippage in Basispunkten")
     parser.add_argument("--long-only", action="store_true", help="Ignoriere Short-Signale.")
     parser.add_argument(
+        "--use-strategy-exits",
+        action="store_true",
+        help="Nutze ATR-basierte Stop/Take-Profit-Level aus dem Signal-Frame.",
+    )
+    parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        help="Teile jeden Symbolverlauf in in-sample/out-of-sample und schreibe beide Segmente.",
+    )
+    parser.add_argument(
+        "--in-sample-fraction",
+        type=float,
+        default=0.7,
+        help="Anteil der Bars fuer in-sample im --walk-forward Modus.",
+    )
+    parser.add_argument(
         "--output",
         default="data/backtest_equity.csv",
         help="Zielpfad fuer Equity-Kurve und Portfolio-Serie",
     )
+
+
+def _add_backtest_report_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "backtest-report",
+        help="Rendere Markdown/PNG-Report aus gespeicherten Backtest-Dateien.",
+    )
+    parser.add_argument(
+        "equity",
+        help="Pfad zur Equity-Kurve (.csv, .parquet oder .json).",
+    )
+    parser.add_argument(
+        "--trades",
+        default=None,
+        help="Optionaler Pfad zur Trades-Datei. Default: <equity_stem>_trades.csv",
+    )
+    parser.add_argument(
+        "--metrics",
+        default=None,
+        help="Optionaler Pfad zur Metrics-JSON. Default: <equity_stem>_metrics.json",
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="data/backtest_report",
+        help="Zielordner fuer REPORT.md, CSV-Summaries und PNG-Dateien.",
+    )
+
+
+def _add_dashboard_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "dashboard",
+        help="Starte ein lokales Read-only Dashboard fuer gespeicherte Backtest/Sweep-Artefakte.",
+    )
+    parser.add_argument(
+        "--data-dir",
+        default="data",
+        help="Root-Ordner mit Backtest- und Sweep-Dateien.",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP host.")
+    parser.add_argument("--port", type=int, default=8765, help="HTTP port.")
 
 
 def _add_sweep_parser(subparsers) -> None:
@@ -346,6 +466,25 @@ def _add_sweep_parser(subparsers) -> None:
         "--quick",
         action="store_true",
         help="Smoke-Modus: kleines Grid + kleinere Cohorts (zur Validierung).",
+    )
+
+
+def _add_sweep_report_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "sweep-report",
+        help="Rendere PNG/Markdown-Report aus einer Sweep-Parquet-Datei.",
+    )
+    parser.add_argument("input", help="Pfad zur Sweep-Parquet-Datei.")
+    parser.add_argument(
+        "--out-dir",
+        default="data/sweep_report",
+        help="Zielordner fuer REPORT.md und PNG-Dateien.",
+    )
+    parser.add_argument(
+        "--min-trades",
+        type=int,
+        default=30,
+        help="Mindestzahl OOS-Trades fuer eligible Zellen im Report.",
     )
 
 
@@ -417,6 +556,24 @@ def _add_strategy_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=20,
         help="Lookback-Fenster fuer Hoch/Tief-Breakouts",
+    )
+    parser.add_argument(
+        "--mean-reversion-zscore",
+        type=float,
+        default=1.5,
+        help="Z-Score-Schwelle fuer mean_reversion Signale",
+    )
+    parser.add_argument(
+        "--momentum-lookback",
+        type=int,
+        default=20,
+        help="Lookback-Fenster fuer momentum_trend ROC",
+    )
+    parser.add_argument(
+        "--momentum-roc-floor",
+        type=float,
+        default=0.02,
+        help="Mindest-ROC fuer momentum_trend Signale",
     )
 
 

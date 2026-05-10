@@ -46,7 +46,7 @@ def _require_credentials() -> None:
 
 
 def _fetch_indicators(symbol: str, bars: int, timeframe: str = "1d") -> pd.DataFrame:
-    raw = fetch_ohlcv(FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars), source="alpaca")
+    raw = fetch_ohlcv(FetchRequest(symbol=symbol, timeframe=timeframe, bars=bars))
     return build_indicator_frame(raw)
 
 
@@ -94,7 +94,7 @@ def render_signals_breakout(out_path: Path) -> None:
 
 def render_portfolio_equity(out_path: Path) -> None:
     raw_frames = [
-        fetch_ohlcv(FetchRequest(symbol=s, timeframe="1d", bars=BACKTEST_BARS), source="alpaca")
+        fetch_ohlcv(FetchRequest(symbol=s, timeframe="1d", bars=BACKTEST_BARS))
         for s in PORTFOLIO_SYMBOLS
     ]
     enriched = pd.concat([build_indicator_frame(f) for f in raw_frames], ignore_index=True)
