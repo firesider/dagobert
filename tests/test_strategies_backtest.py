@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from trader.backtest import BacktestConfig, run_backtest
+from trader.backtest import BacktestConfig, _build_portfolio_curve, run_backtest
 from trader.strategies import StrategyConfig, build_signal_frame, latest_signals
 
 
@@ -104,3 +106,51 @@ def test_run_backtest_returns_portfolio_curve_and_trade_log() -> None:
     assert result.metrics["trade_count"] >= 1
     assert "sharpe" in result.metrics
     assert not result.trades.empty
+
+
+def test_portfolio_curve_ignores_missing_bars_per_symbol() -> None:
+    """A symbol that is absent at time t must not be counted as a 0-return —
+    the equal-weight mean should be taken over symbols present at t."""
+    times = pd.date_range("2024-01-01", periods=4, freq="h", tz="UTC")
+    a_curve = pd.DataFrame(
+        {
+            "time": times,
+            "symbol": "AAA",
+            "strategy_return": [0.10, 0.10, 0.10, 0.10],
+        }
+    )
+    # BBB is only present for the last two bars.
+    b_curve = pd.DataFrame(
+        {
+            "time": times[2:],
+            "symbol": "BBB",
+            "strategy_return": [0.10, 0.10],
+        }
+    )
+    equity_curve = pd.concat([a_curve, b_curve], ignore_index=True)
+
+    portfolio = _build_portfolio_curve(equity_curve, initial_capital=1_000.0)
+
+    # At every t the present symbols all return 10%, so the equal-weight mean
+    # must be 0.10 — never diluted to 0.05 by treating BBB as a 0-return at t0/t1.
+    np.testing.assert_allclose(portfolio["strategy_return"].to_numpy(), [0.10] * 4)
+    expected_equity = 1_000.0 * (1.10**4)
+    assert portfolio["equity"].iloc[-1] == pytest.approx(expected_equity)
+
+
+def test_signal_frame_does_not_use_lookahead() -> None:
+    """build_signal_frame on a truncated frame must produce signals identical to
+    the prefix of the full-frame run. If a strategy ever did `.shift(-1)` or
+    used future data, this test would catch it."""
+    full_frame = _feature_frame()
+    truncated = full_frame.iloc[:-3].copy()
+
+    full = build_signal_frame(full_frame, StrategyConfig(strategy="ema_rsi_pullback"))
+    partial = build_signal_frame(truncated, StrategyConfig(strategy="ema_rsi_pullback"))
+
+    overlap_cols = ["signal", "signal_label", "conviction_score"]
+    pd.testing.assert_frame_equal(
+        partial[overlap_cols].reset_index(drop=True),
+        full.iloc[: len(partial)][overlap_cols].reset_index(drop=True),
+        check_dtype=False,
+    )

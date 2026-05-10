@@ -170,12 +170,13 @@ def _extract_trades(
 
 
 def _build_portfolio_curve(equity_curve: pd.DataFrame, initial_capital: float) -> pd.DataFrame:
-    returns = (
-        equity_curve.pivot(index="time", columns="symbol", values="strategy_return")
-        .sort_index()
-        .fillna(0.0)
-    )
-    portfolio_return = returns.mean(axis=1)
+    returns = equity_curve.pivot(
+        index="time", columns="symbol", values="strategy_return"
+    ).sort_index()
+    # Equal-weight mean over symbols *that have a bar at this time*. NaN-returns
+    # (a symbol with no bar at t) must not be silently treated as a zero return
+    # — that would dilute the average and under-weight symbols with gaps.
+    portfolio_return = returns.mean(axis=1, skipna=True).fillna(0.0)
     equity = initial_capital * (1.0 + portfolio_return).cumprod()
     drawdown = (equity / equity.cummax()) - 1.0
 

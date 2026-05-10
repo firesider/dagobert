@@ -58,6 +58,12 @@ def test_build_indicator_frame_uses_proxy_volume_when_needed() -> None:
     features = build_indicator_frame(_sample_frame(with_volume=False))
     assert features["volume_is_proxy"].all()
     assert (features["analysis_volume"] > 0).all()
+    # Downstream volume-based ta indicators must see finite values from the
+    # proxy — otherwise the proxy is decorative and doesn't actually rescue
+    # volumeless pipelines.
+    tail = features.tail(50)  # warmup window passed
+    for column in ("volume_obv", "volume_cmf", "volume_mfi"):
+        assert tail[column].notna().any(), f"{column} should not be all-NaN with proxy volume"
 
 
 def test_build_latest_snapshot_returns_one_row_per_symbol() -> None:

@@ -136,3 +136,24 @@ def test_is_available_reflects_find_spec(monkeypatch) -> None:
 
     monkeypatch.setattr(util, "find_spec", lambda name: object())
     assert AlpacaClient.is_available() is True
+
+
+def test_connection_settings_repr_masks_secrets() -> None:
+    settings = AlpacaConnectionSettings(
+        api_key="PKLONGKEY12345",
+        api_secret="SuperSecretValueXYZ987",
+        paper=True,
+        data_feed="iex",
+    )
+    text = repr(settings)
+    assert "PKLONGKEY12345" not in text
+    assert "SuperSecretValueXYZ987" not in text
+    # Last 4 chars are revealed for diagnostics.
+    assert "2345" in text
+    assert "Z987" in text
+
+
+def test_connection_settings_repr_masks_short_or_missing_secrets() -> None:
+    text = repr(AlpacaConnectionSettings(api_key=None, api_secret="abc"))
+    assert "abc" not in text
+    assert "***" in text

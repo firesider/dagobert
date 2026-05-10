@@ -23,12 +23,21 @@ class AlpacaUnavailableError(AlpacaError):
     """Raised when the alpaca-py package is not importable."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class AlpacaConnectionSettings:
     api_key: str | None = None
     api_secret: str | None = None
     paper: bool = True
     data_feed: str = "iex"
+
+    def __repr__(self) -> str:
+        return (
+            "AlpacaConnectionSettings("
+            f"api_key={_mask_secret(self.api_key)!r}, "
+            f"api_secret={_mask_secret(self.api_secret)!r}, "
+            f"paper={self.paper!r}, "
+            f"data_feed={self.data_feed!r})"
+        )
 
     @classmethod
     def from_env(cls) -> AlpacaConnectionSettings:
@@ -223,3 +232,11 @@ def _parse_bool(value: str | None, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"Ungueltiger Boolean-Wert fuer ALPACA_PAPER: {value}")
+
+
+def _mask_secret(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= 4:
+        return "***"
+    return f"***{value[-4:]}"

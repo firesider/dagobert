@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from dotenv import load_dotenv
 
 from trader.alpaca import AlpacaError
 from trader.backtest import BacktestConfig, run_backtest
@@ -35,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Load .env from CWD if present; existing environment variables win.
+    load_dotenv(override=False)
+
     args_list = list(argv if argv is not None else sys.argv[1:])
     if not args_list:
         args_list = ["dataset"]
